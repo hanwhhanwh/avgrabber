@@ -2,14 +2,35 @@ import urllib.request, urllib.parse, urllib.error
 from bs4 import BeautifulSoup
 
 
-def findValue(strings, nIndex):
+
+""" 주어진 문자열 lsit에서 순서에 맞게 값을 찾으면, key 항목에 값을 할당합니다.
+"""
+def findValue(strings, nIndex, avInfo, key):
 	for nValueIndex in range(nIndex + 1, len(strings) - 1):
 		if (strings[nValueIndex].strip() == ''):
 			continue
 		if (strings[nValueIndex].find(':') >= 0):
 			return ''
-		return strings[nValueIndex]
+		avInfo[key] = strings[nValueIndex]
 	return ''
+
+
+""" 주어진 문자열 lsit에서 순서에 맞게 모든 값들을 찾아서, 해당 key list에 추가합니다.
+"""
+def findValues(strings, nIndex, avInfo, key):
+	values = []
+	for nValueIndex in range(nIndex + 1, len(strings) - 1):
+		if (strings[nValueIndex].strip() == ''):
+			continue
+		if (strings[nValueIndex].find(':') >= 0):
+			break
+		if (strings[nValueIndex].find('出演者') >= 0):
+			break
+		values.append(strings[nValueIndex])
+	if (len(values) > 0):
+		avInfo[key] = values
+	return ''
+
 
 
 good_num = 'SNIS-832'
@@ -37,31 +58,30 @@ print(strings)
 
 # print(strings[1])
 
+# initialize AV Info dictionary
 avInfo = {}
-avInfo['genre'] = []
-avInfo['actress'] = []
 
 nStringCount = len(strings)
 for nIndex in range(0, nStringCount - 1):
-	value = strings[nIndex]
-	if (value == '品番:'):
-		avInfo['good_num'] = findValue(strings, nIndex)
-	if (value == '発売日:'):
-		avInfo['publish_date'] = findValue(strings, nIndex)
-	if (value == '収録時間:'):
-		avInfo['play_time'] = findValue(strings, nIndex)
-	if (value == '監督:'):
-		avInfo['director'] = findValue(strings, nIndex)
-	if (value == 'メーカー:'):
-		avInfo['maker'] = findValue(strings, nIndex)
-	if (value == 'レーベル:'):
-		avInfo['label'] = findValue(strings, nIndex)
-	if (value == 'シリーズ:'):
-		avInfo['series'] = findValue(strings, nIndex)
-	if (value == 'ジャンル:'):
-		avInfo['genre'].append(findValue(strings, nIndex))
-	if (value == '出演者'):
-		avInfo['actress'].append(findValue(strings, nIndex + 1))
+	item_name = strings[nIndex]
+	if (item_name == '品番:'):
+		findValue(strings, nIndex, avInfo, 'good_num')
+	if (item_name == '発売日:'):
+		findValue(strings, nIndex, avInfo, 'publish_date')
+	if (item_name == '収録時間:'):
+		findValue(strings, nIndex, avInfo, 'play_time')
+	if (item_name == '監督:'):
+		findValue(strings, nIndex, avInfo, 'director')
+	if (item_name == 'メーカー:'):
+		findValue(strings, nIndex, avInfo, 'maker')
+	if (item_name == 'レーベル:'):
+		findValue(strings, nIndex, avInfo, 'label')
+	if (item_name == 'シリーズ:'):
+		findValue(strings, nIndex, avInfo, 'series')
+	if (item_name == 'ジャンル:'):
+		findValues(strings, nIndex, avInfo, 'genre')
+	if (item_name == '出演者'):
+		findValues(strings, nIndex + 1, avInfo, 'actress')
 
 print(avInfo)
 
