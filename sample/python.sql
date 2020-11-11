@@ -12,3 +12,20 @@ DROP USER 'python'@'%';
 DROP DATABASE `PYTHON_DEMO`;
 
 */
+
+
+CREATE TABLE IF NOT EXISTS MEMBER
+(
+	member_no	INT NOT NULL AUTO_INCREMENT COMMENT 'member number'
+	, member_name VARCHAR (100) NOT NULL COMMENT 'member name'
+
+	, PRIMARY KEY ( member_no )
+)
+COMMENT 'Member Table'
+COLLATE='utf8_general_ci'
+ENGINE=InnoDB
+;
+
+
+
+INSERT INTO member ( member_name ) VALUES ( 'DEMO1' ), ( 'DEMO2' );
