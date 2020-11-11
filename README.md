@@ -1,2 +1,2 @@
 # avgrabber
-AV Info Grabber
+AV Info Grabber by Python
