@@ -4,7 +4,7 @@ CREATE TABLE `FILM`
 	`film_no`				INT NOT NULL AUTO_INCREMENT COMMENT '작품 고유번호'
 	, `member_no`			INT NOT NULL COMMENT '작성자 고유번호 (FK: MEMBER.member_no)'
 	, `film_id`				VARCHAR(50) NOT NULL COMMENT '작품의 품번' COLLATE 'utf8_general_ci'
-	, `productor_no`		INT NULL COMMENT '제작사 고유번호 (FK: PRODUCTOR.productor_no)'
+	, `product_company_no`	INT NULL COMMENT '제작사 고유번호 (FK: PRODUCT_COMPANY.product_company_no)'
 	, `label_no`			INT NULL COMMENT '레이블 고유번호 (FK: LABEL.label_no)'
 	, `film_kr_name`		VARCHAR(255) NULL COMMENT '작품의 한글 제목' COLLATE 'utf8_general_ci'
 	, `film_en_name`		VARCHAR(255) NULL COMMENT '작품의 영문 제목' COLLATE 'utf8_general_ci'
