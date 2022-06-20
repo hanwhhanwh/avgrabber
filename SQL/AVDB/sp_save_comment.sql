@@ -2,10 +2,11 @@ DELIMITER $$
 
 CREATE OR REPLACE PROCEDURE sp_save_comment
 (
-	IN p_member_no INT
-	, IN p_film_id VARCHAR(255)
-	, IN p_film_rate INT
-	, IN p_film_comment MEDIUMTEXT
+	IN p_member_no INT -- 댓글을 입력하는 회원 고유번호
+	, IN p_film_id VARCHAR(255) -- 작품 고유 ID
+	, IN p_is_owned TINYINT -- 작품 소유 여부 (0 = 미소유, 1 = 소유)
+	, IN p_film_rate INT -- 작품에 대한 주관적 점수 (0 ~ 100)
+	, IN p_film_comment MEDIUMTEXT -- 작품에 대한 감상/댓글
 )
 	LANGUAGE SQL
 	NOT DETERMINISTIC
@@ -30,9 +31,9 @@ IF v_film_no IS NULL THEN
 
 	-- 신규 작품 추가하기
 	INSERT INTO `FILM`
-	(member_no, film_id)
+	(member_no, film_id, is_owned)
 	VALUES
-	(p_member_no, UPPER(p_film_id));
+	(p_member_no, UPPER(p_film_id), p_is_owned);
 	
 	SET v_film_no = LAST_INSERT_ID();
 

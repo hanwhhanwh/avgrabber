@@ -14,6 +14,7 @@ CREATE TABLE `FILM`
 	, `cover_image_url`		VARCHAR(255) NULL COMMENT '표지 이미지 주소 정보' COLLATE 'utf8_general_ci'
 	, `publish_date`		DATE NULL COMMENT '작품 출시일'
 	, `film_stroy`			MEDIUMTEXT NULL COMMENT '작품 줄거리' COLLATE 'utf8_general_ci'
+	, `is_owned`			TINYINT NULL DEFAULT(0) COMMENT '작품 소유 여부'
 	, `reg_date`			DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP() COMMENT '작품 정보 등록시각'
 
 	, PRIMARY KEY (`film_no`) USING BTREE
