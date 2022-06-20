@@ -11,7 +11,7 @@ CREATE TABLE `FILM`
 	, `film_jp_name`		VARCHAR(255) NULL COMMENT '작품의 일문 제목' COLLATE 'utf8_general_ci'
 	, `film_ch_name`		VARCHAR(255) NULL COMMENT '작품의 중문 제목' COLLATE 'utf8_general_ci'
 	, `length`				SMALLINT NULL COMMENT '시간 (분)'
-	, `cover_image_url`		VARCHAR(255) NOT NULL COMMENT '표지 이미지 주소 정보' COLLATE 'utf8_general_ci'
+	, `cover_image_url`		VARCHAR(255) NULL COMMENT '표지 이미지 주소 정보' COLLATE 'utf8_general_ci'
 	, `publish_date`		DATE NULL COMMENT '작품 출시일'
 	, `film_stroy`			MEDIUMTEXT NULL COMMENT '작품 줄거리' COLLATE 'utf8_general_ci'
 	, `reg_date`			DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP() COMMENT '작품 정보 등록시각'
