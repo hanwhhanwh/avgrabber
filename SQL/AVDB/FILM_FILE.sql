@@ -3,8 +3,10 @@ CREATE TABLE `FILM_FILE`
 (
 	`file_no`				INT NOT NULL AUTO_INCREMENT COMMENT 'FILM 파일 정보의 고유번호'
 	, `film_no`				INT NOT NULL COMMENT 'FILM 고유번호 (FK: FILM.film_on)'
-	, `file_name`			VARCHAR(800) NOT NULL COMMENT '파일 이름' COLLATE 'utf8mb4_unicode_ci'
-	, `file_size`			INT64 NULL COMMENT COMMENT '파일 용량'
+	, `file_name`			VARCHAR(500) NOT NULL COMMENT '파일 이름' COLLATE 'utf8mb4_unicode_ci'
+	, `file_path`			VARCHAR(500) NULL COMMENT '파일 경로' COLLATE 'utf8mb4_unicode_ci'
+	, `file_size`			BIGINT NULL COMMENT '파일 용량'
+	, `file_date`			DATETIME NOT NULL COMMENT '영상파일 생성시각'
 	, `lang`				VARCHAR(10) NOT NULL COMMENT '언어 ; KR, CH, US, ...'
 	, `resolution`			CHAR(1) NOT NULL DEFAULT ('F') COMMENT '영상파일의 해상도 : F=FHD, H=HD, S=SD, 4=4K, 8=8K, ...'
 	, `has_owned`			BIT NOT NULL DEFAULT (1) COMMENT '소유 여부'
