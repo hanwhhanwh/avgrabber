@@ -9,8 +9,20 @@ CREATE TABLE `COMMENTS`
 	, `reg_date`			DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP() COMMENT '댓글/감상 정보 등록시각'
 
 	, PRIMARY KEY (`comment_no`) USING BTREE
+	, INDEX IX_FILM_NO ( `film_no` ) USING BTREE
 )
 COMMENT='작품에 대한 댓글/감상 정보 테이블'
 COLLATE='utf8_general_ci'
 ENGINE=InnoDB
 ;
+
+/*
+-- 2023-12-10 ; COLLATE='utf8mb4_unicode_ci'로 변경
+ALTER TABLE `COMMENTS`
+	COLLATE='utf8mb4_unicode_ci',
+	CONVERT TO CHARSET utf8mb4;
+
+ALTER TABLE `COMMENTS`
+	ADD INDEX IX_FILM_NO ( `film_no` ) USING BTREE;
+
+*/
