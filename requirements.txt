@@ -1,5 +1,6 @@
 bs4
 fastapi
+jinja2
 mysql-connector-python
 requests
 SQLAlchemy
