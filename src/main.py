@@ -318,8 +318,11 @@ class VideoEncoder:
 		if (subtitle_file is not None):
 			cmd.extend(["-i", str(subtitle_file)])
 
+		cmd.extend(["-f", "mp4"])
+		if (True):
+			cmd.extend(["-vf", "scale=1280:720"])
+
 		cmd.extend([
-			"-f", "mp4",
 			"-c:v", "libx265",
 			"-crf:v", str(self.config.get(ConfigKey.CRF)),
 			"-preset:v", "slow",
@@ -412,8 +415,6 @@ class VideoEncoder:
 					if (not chunk):
 						break
 
-					log.write(chunk)
-					# if ((chunk != '\r') and (chunk != '\n')):
 					if ((chunk != b'\r') and (chunk != b'\n')):
 						buffer += chunk
 						continue
@@ -422,10 +423,14 @@ class VideoEncoder:
 					line_str = buffer.decode('utf-8', errors='ignore')
 					# log.write(line_str)
 					# log.flush()
-					buffer = b""
 
 					if (self.parse_progress(line_str, file_info)):
 						await websocket_manager.broadcast_status(self.get_all_status())
+					else:
+						log.write(buffer)
+						log.flush()
+					buffer = b""
+
 
 				await process.wait()
 
