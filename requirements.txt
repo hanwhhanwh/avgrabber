@@ -1,5 +1,7 @@
 bs4
-flask
+fastapi
 mysql-connector-python
 requests
 SQLAlchemy
+uvicorn
+websockets
