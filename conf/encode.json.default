@@ -1,0 +1,11 @@
+{
+  "ffmpeg_path": "path/to/ffmpeg",
+  "ffprobe_path": "path/to/ffprobe",
+  "input_dir": "/path/to/input_dir",
+  "output_dir": "/path/to/output_dir",
+  "subtitle_dir": "/path/to/sub_dir",
+  "log_dir": "logs",
+  "crf": 27,
+  "volume": 1.15,
+  "audio_bitrate": "128k"
+}
