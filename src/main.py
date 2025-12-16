@@ -14,6 +14,7 @@ import asyncio
 import json
 import re
 import subprocess
+import traceback
 
 
 
@@ -319,8 +320,8 @@ class VideoEncoder:
 			cmd.extend(["-i", str(subtitle_file)])
 
 		cmd.extend(["-f", "mp4"])
-		if (True):
-			cmd.extend(["-vf", "scale=1280:720"])
+		# if (True):
+		# 	cmd.extend(["-vf", "scale=1280:720"])
 
 		cmd.extend([
 			"-c:v", "libx265",
@@ -406,7 +407,11 @@ class VideoEncoder:
 				process = await asyncio.create_subprocess_exec(
 					*cmd,
 					stdout=subprocess.PIPE,
-					stderr=subprocess.STDOUT
+					stderr=subprocess.STDOUT,
+					creationflags=(
+						subprocess.IDLE_PRIORITY_CLASS
+						| subprocess.CREATE_NO_WINDOW
+					)
 				)
 
 				buffer = b""
@@ -419,7 +424,8 @@ class VideoEncoder:
 						buffer += chunk
 						continue
 
-					buffer += b'\n'
+					if (chunk == b'\n'):
+						buffer += b'\n'
 					line_str = buffer.decode('utf-8', errors='ignore')
 					# log.write(line_str)
 					# log.flush()
@@ -428,11 +434,11 @@ class VideoEncoder:
 						await websocket_manager.broadcast_status(self.get_all_status())
 					else:
 						log.write(buffer)
-						log.flush()
 					buffer = b""
 
 
 				await process.wait()
+				log.flush()
 
 				if (process.returncode == 0):
 					file_info.status = FileStatus.COMPLETED
@@ -443,7 +449,9 @@ class VideoEncoder:
 
 		except Exception as e:
 			print(f"인코딩 오류: {e}")
+			traceback.print_exc()
 			file_info.status = FileStatus.FAILED
+			process.terminate()
 			return False
 		finally:
 			await websocket_manager.broadcast_status(self.get_all_status())
@@ -513,7 +521,10 @@ class WebSocketManager:
 		Args:
 			websocket: WebSocket 연결
 		"""
-		self.active_connections.remove(websocket)
+		try:
+			self.active_connections.remove(websocket)
+		except:
+			pass
 
 
 	async def broadcast_status(self, status: Dict[str, Any]) -> None:
@@ -527,7 +538,9 @@ class WebSocketManager:
 		for connection in self.active_connections:
 			try:
 				await connection.send_json(status)
-			except Exception:
+			except Exception as e:
+				print(f"broadcast_status error: {e}")
+				traceback.print_exc()
 				disconnected.append(connection)
 
 		for connection in disconnected:
