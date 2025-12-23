@@ -4,6 +4,7 @@
 	<title>FFmpeg 인코딩 현황</title>
 	<meta charset="utf-8">
 	<link href="css/style.css" rel="stylesheet" />
+	<script src="js/ui.js"></script>
 </head>
 <body>
 
@@ -12,17 +13,35 @@
 		<h1>🎬 FFmpeg 인코딩 모니터</h1>
 		<p>실시간 동영상 인코딩 진행 상황</p>
 	</div>
-
+	
 	<div class="connection-status" id="connectionStatus">
 		<span class="disconnected">연결 중...</span>
 	</div>
-
+	
+	<div class="overall-progress">
+		<div class="overall-progress-label">
+			<span><strong>전체 진행률</strong></span>
+			<span id="progressText">0 / 0 완료</span>
+		</div>
+		<div class="overall-progress-bar-container">
+			<div class="overall-progress-bar" id="overallProgressBar" style="width: 0%">
+				0%
+			</div>
+		</div>
+	</div>
+	
 	<div class="controls">
 		<button class="btn btn-primary" id="startBtn" onclick="startEncoding()">
-			인코딩 시작
+			▶️ 인코딩 시작
+		</button>
+		<button class="btn btn-warning" id="stopCurrentBtn" onclick="stopCurrent()" disabled>
+			⏸️ 현재 파일 중단
+		</button>
+		<button class="btn btn-danger" id="stopAllBtn" onclick="stopAll()" disabled>
+			⏹️ 전체 중단
 		</button>
 	</div>
-
+	
 	<div class="file-list" id="fileList">
 		<div class="empty-state">
 			<svg fill="currentColor" viewBox="0 0 20 20">
@@ -32,123 +51,6 @@
 		</div>
 	</div>
 </div>
-
-<script>
-let ws = null;
-let isEncoding = false;
-
-function connect() {
-	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-	ws.onopen = () => {
-		updateConnectionStatus(true);
-	};
-
-	ws.onmessage = (event) => {
-		const data = JSON.parse(event.data);
-		updateFileList(data);
-	};
-
-	ws.onclose = () => {
-		updateConnectionStatus(false);
-		setTimeout(connect, 3000);
-	};
-
-	ws.onerror = () => {
-		updateConnectionStatus(false);
-	};
-}
-
-function updateConnectionStatus(connected) {
-	const status = document.getElementById('connectionStatus');
-	if (connected) {
-		status.innerHTML = '<span class="connected">✓ 연결됨</span>';
-	} else {
-		status.innerHTML = '<span class="disconnected">✗ 연결 끊김</span>';
-	}
-}
-
-function updateFileList(data) {
-	const fileList = document.getElementById('fileList');
-
-	if (!data.files || data.files.length === 0) {
-		fileList.innerHTML = `
-			<div class="empty-state">
-				<svg fill="currentColor" viewBox="0 0 20 20">
-					<path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/>
-				</svg>
-				<p>인코딩할 파일이 없습니다</p>
-			</div>
-		`;
-		return;
-	}
-
-	let html = '';
-	data.files.forEach((file) => {
-		const statusClass = `status-${file.status}`;
-		const itemClass = file.status;
-
-		let progressHtml = '';
-		if (file.status === 'in_progress' && file.progress) {
-			progressHtml = `
-				<div class="progress-info">
-					<div class="progress-item">
-						<span class="progress-label">Frame:</span> ${file.progress.frame}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">FPS:</span> ${file.progress.fps}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Size:</span> ${file.progress.size}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Time:</span> ${file.progress.time}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Speed:</span> ${file.progress.speed}
-					</div>
-				</div>
-			`;
-		}
-
-		html += `
-			<div class="file-item ${itemClass}">
-				<div class="file-header">
-					<span class="filename">${file.filename}</span>
-					<span class="status-badge ${statusClass}">${file.status}</span>
-				</div>
-				${progressHtml}
-			</div>
-		`;
-	});
-
-	fileList.innerHTML = html;
-
-	isEncoding = data.current_index >= 0;
-	document.getElementById('startBtn').disabled = isEncoding;
-}
-
-async function startEncoding() {
-	if (isEncoding) return;
-
-	try {
-		const response = await fetch('/start', { method: 'POST' });
-		const result = await response.json();
-
-		if (!result.success) {
-			alert(result.message || '인코딩 시작 실패');
-		}
-	} catch (error) {
-		alert('인코딩 시작 중 오류 발생: ' + error.message);
-	}
-}
-
-connect();
-</script>
 
 </body>
 </html>
