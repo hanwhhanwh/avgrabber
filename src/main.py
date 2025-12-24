@@ -809,10 +809,17 @@ class WebSocketManager:
 		Args:
 			status: 상태 정보
 		"""
+
+		def path_handler(obj: Any) -> Any:
+			if (isinstance(obj, Path)):
+				return str(obj)
+			return obj
+
 		disconnected = []
 		for connection in self.active_connections:
 			try:
-				await connection.send_json(status)
+				json_str = json.dumps(status, default=path_handler)
+				await connection.send_json(json.loads(json_str))
 			except Exception as e:
 				print(f"broadcast_status error: {e}")
 				traceback.print_exc()
