@@ -1,5 +1,7 @@
 let ws = null;
 let isEncoding = false;
+let filesData = [];
+
 
 function connect() {
 	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -11,8 +13,15 @@ function connect() {
 	
 	ws.onmessage = (event) => {
 		const data = JSON.parse(event.data);
-		updateFileList(data);
-		updateOverallProgress(data);
+		
+		if (data.type === 'full') {
+			filesData = data.files;
+			updateFileList(data);
+			updateOverallProgress(data);
+		} else if (data.type === 'current') {
+			updateCurrentFile(data);
+			updateOverallProgress(data);
+		}
 	};
 	
 	ws.onclose = () => {
@@ -25,6 +34,7 @@ function connect() {
 	};
 }
 
+
 function updateConnectionStatus(connected) {
 	const status = document.getElementById('connectionStatus');
 	if (connected) {
@@ -34,6 +44,7 @@ function updateConnectionStatus(connected) {
 	}
 }
 
+
 function updateOverallProgress(data) {
 	const progressBar = document.getElementById('overallProgressBar');
 	const progressText = document.getElementById('progressText');
@@ -42,7 +53,96 @@ function updateOverallProgress(data) {
 	progressBar.style.width = `${percent}%`;
 	progressBar.textContent = `${percent.toFixed(1)}%`;
 	progressText.textContent = `${data.completed_count || 0} / ${data.total_count || 0} 완료`;
+	
+	isEncoding = data.current_index >= 0;
+	document.getElementById('startBtn').disabled = isEncoding;
+	document.getElementById('stopCurrentBtn').disabled = !isEncoding;
+	document.getElementById('stopAllBtn').disabled = !isEncoding;
 }
+
+
+function updateCurrentFile(data) {
+	if (data.current_file && data.current_index >= 0 && data.current_index < filesData.length) {
+		filesData[data.current_index] = data.current_file;
+		
+		const fileItems = document.querySelectorAll('.file-item');
+		if (fileItems[data.current_index]) {
+			const fileElement = fileItems[data.current_index];
+			updateFileElement(fileElement, data.current_file);
+		}
+	}
+}
+
+
+function updateFileElement(element, file) {
+	element.className = `file-item ${file.status}`;
+	
+	const statusBadge = element.querySelector('.status-badge');
+	if (statusBadge) {
+		statusBadge.className = `status-badge status-${file.status}`;
+		statusBadge.textContent = file.status;
+	}
+	
+	let progressBarHtml = '';
+	let progressInfoHtml = '';
+	
+	if (file.status === 'in_progress' && file.progress) {
+		progressBarHtml = `
+			<div class="progress-bar-container">
+				<div class="progress-bar" style="width: ${file.progress.percent}%">
+					${file.progress.percent}%
+				</div>
+			</div>
+		`;
+		progressInfoHtml = `
+			<div class="progress-info">
+				<div class="progress-item">
+					<span class="progress-label">Frame:</span> ${file.progress.frame}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">FPS:</span> ${file.progress.fps}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">Size:</span> ${file.progress.size}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">Time:</span> ${file.progress.time}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">Speed:</span> ${file.progress.speed}
+				</div>
+			</div>
+		`;
+	}
+	
+	const existingVideoInfo = element.querySelector('.video-info');
+	const existingProgressBar = element.querySelector('.progress-bar-container');
+	const existingProgressInfo = element.querySelector('.progress-info');
+	
+	if (existingProgressBar) {
+		existingProgressBar.remove();
+	}
+	if (existingProgressInfo) {
+		existingProgressInfo.remove();
+	}
+	
+	if (progressBarHtml) {
+		if (existingVideoInfo) {
+			existingVideoInfo.insertAdjacentHTML('afterend', progressBarHtml);
+		}
+	}
+	
+	if (progressInfoHtml) {
+		const newProgressBar = element.querySelector('.progress-bar-container');
+		if (newProgressBar) {
+			newProgressBar.insertAdjacentHTML('afterend', progressInfoHtml);
+		}
+	}
+}
+
 
 function updateFileList(data) {
 	const fileList = document.getElementById('fileList');
@@ -63,6 +163,21 @@ function updateFileList(data) {
 	data.files.forEach((file) => {
 		const statusClass = `status-${file.status}`;
 		const itemClass = file.status;
+		
+		const canChangeResolution = file.status === 'pending' && file.video_info.resolution;
+		
+		let resolutionSelector = '';
+		if (canChangeResolution) {
+			resolutionSelector = `
+				<div class="resolution-selector">
+					<label>해상도:</label>
+					<select onchange="changeResolution('${file.filename}', this.value)">
+						<option value="hd" ${file.resolution_mode === 'hd' ? 'selected' : ''}>HD (1280)</option>
+						<option value="fhd" ${file.resolution_mode === 'fhd' ? 'selected' : ''}>FHD (1920)</option>
+					</select>
+				</div>
+			`;
+		}
 		
 		let videoInfoHtml = '';
 		if (file.video_info) {
@@ -106,6 +221,7 @@ function updateFileList(data) {
 					</div>
 					` : ''}
 				</div>
+				${resolutionSelector}
 			`;
 		}
 		
@@ -161,12 +277,8 @@ function updateFileList(data) {
 	});
 	
 	fileList.innerHTML = html;
-	
-	isEncoding = data.current_index >= 0;
-	document.getElementById('startBtn').disabled = isEncoding;
-	document.getElementById('stopCurrentBtn').disabled = !isEncoding;
-	document.getElementById('stopAllBtn').disabled = !isEncoding;
 }
+
 
 function formatDuration(seconds) {
 	if (!seconds) return '00:00:00';
@@ -175,6 +287,7 @@ function formatDuration(seconds) {
 	const s = Math.floor(seconds % 60);
 	return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
+
 
 async function startEncoding() {
 	if (isEncoding) return;
@@ -191,6 +304,7 @@ async function startEncoding() {
 	}
 }
 
+
 async function stopCurrent() {
 	if (!confirm('현재 파일의 인코딩을 중단하시겠습니까?')) return;
 	
@@ -206,6 +320,7 @@ async function stopCurrent() {
 	}
 }
 
+
 async function stopAll() {
 	if (!confirm('전체 인코딩을 중단하시겠습니까?')) return;
 	
@@ -220,5 +335,30 @@ async function stopAll() {
 		alert('중단 중 오류 발생: ' + error.message);
 	}
 }
+
+
+async function changeResolution(filename, resolution) {
+	try {
+		const response = await fetch('/set-resolution', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				filename: filename,
+				resolution: resolution
+			})
+		});
+		
+		const result = await response.json();
+		
+		if (!result.success) {
+			alert(result.message || '해상도 변경 실패');
+		}
+	} catch (error) {
+		alert('해상도 변경 중 오류 발생: ' + error.message);
+	}
+}
+
 
 connect();

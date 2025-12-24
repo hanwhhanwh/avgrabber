@@ -12,6 +12,7 @@ from typing import Any, Dict, Final, List, Optional
 import argparse
 import asyncio
 import json
+import platform
 import re
 import subprocess
 import traceback
@@ -59,9 +60,9 @@ class ConfigDef:
 	DEFAULT_CRF: Final[int] = 27
 	DEFAULT_VOLUME: Final[float] = 1.15
 	DEFAULT_AUDIO_BITRATE: Final[str] = "128k"
-	RESOLUTION_THRESHOLD: Final[int] = 1500000
 	HD_THRESHOLD: Final[int] = 700000
-	TARGET_WIDTH: Final[int] = 1280
+	HD_WIDTH: Final[int] = 1280
+	FHD_WIDTH: Final[int] = 1920
 
 	TEMPLATES_DIR: Final[str] = "templates/"
 	CSS_DIR: Final[str] = "templates/css"
@@ -79,6 +80,15 @@ class FileStatus(Enum):
 	COMPLETED = "completed"
 	FAILED = "failed"
 	STOPPED = "stopped"
+
+
+
+class ResolutionMode(Enum):
+	"""
+	해상도 모드
+	"""
+	HD = "HD"
+	FHD = "FHD"
 
 
 
@@ -141,7 +151,7 @@ class FileInfo:
 		self.video_info: VideoInfo = VideoInfo()
 		self.subtitle_file: Optional[str] = None
 		self.scale_filter: Optional[str] = None
-
+		self.resolution_mode: ResolutionMode = ResolutionMode.HD
 
 	def to_dict(self) -> Dict[str, Any]:
 		"""
@@ -171,7 +181,8 @@ class FileInfo:
 				"fps": self.video_info.fps
 			},
 			"subtitle": self.subtitle_file,
-			"scale": self.scale_filter
+			"scale": self.scale_filter,
+			"resolution_mode": self.resolution_mode.value
 		}
 
 
@@ -273,6 +284,13 @@ class ConfigManager:
 
 
 
+def path_handler(obj: Any) -> Any:
+	if (isinstance(obj, Path)):
+		return str(obj)
+	return obj
+
+
+
 class VideoEncoder:
 	"""
 	동영상 인코더 클래스
@@ -306,6 +324,29 @@ class VideoEncoder:
 		self.log_dir.mkdir(parents=True, exist_ok=True)
 
 
+	def _set_low_priority(self) -> Dict[str, Any]:
+		"""
+		낮은 우선순위 설정을 위한 subprocess 옵션 반환
+
+		Returns:
+			subprocess 옵션 딕셔너리
+		"""
+		system = platform.system()
+
+		if (system == "Windows"):
+			import subprocess
+			return {
+				"creationflags": subprocess.BELOW_NORMAL_PRIORITY_CLASS
+			}
+		else:
+			import os
+			def set_priority():
+				os.nice(19)
+			return {
+				"preexec_fn": set_priority
+			}
+
+
 	async def get_video_info_with_ffprobe(self, video_file: Path) -> VideoInfo:
 		"""
 		ffprobe로 동영상 정보 추출
@@ -328,10 +369,13 @@ class VideoEncoder:
 				str(video_file)
 			]
 
+			priority_kwargs = self._set_low_priority()
+
 			process = await asyncio.create_subprocess_exec(
 				*cmd,
 				stdout=subprocess.PIPE,
-				stderr=subprocess.PIPE
+				stderr=subprocess.PIPE,
+				**priority_kwargs
 			)
 
 			stdout, _ = await process.communicate()
@@ -392,7 +436,7 @@ class VideoEncoder:
 		return None
 
 
-	def generate_output_filename(self, input_file: Path, video_info: VideoInfo, subtitle_file: Optional[Path]) -> str:
+	def generate_output_filename(self, input_file: Path, video_info: VideoInfo, subtitle_file: Optional[Path], resolution_mode: ResolutionMode) -> str:
 		"""
 		출력 파일명 생성
 
@@ -400,6 +444,7 @@ class VideoEncoder:
 			input_file: 입력 파일 경로
 			video_info: 동영상 정보
 			subtitle_file: 자막 파일 경로
+			resolution_mode: 해상도 모드
 
 		Returns:
 			출력 파일명
@@ -413,7 +458,10 @@ class VideoEncoder:
 		base_name = match.group(1)
 
 		if (video_info.pixel_count >= ConfigDef.HD_THRESHOLD):
-			quality_suffix = "-HD"
+			if (resolution_mode == ResolutionMode.FHD):
+				quality_suffix = "-FHD"
+			else:
+				quality_suffix = "-HD"
 		else:
 			quality_suffix = "-SD"
 
@@ -422,21 +470,31 @@ class VideoEncoder:
 		return f"{base_name}{quality_suffix}{subtitle_suffix}.mp4"
 
 
-	def calculate_scale_filter(self, video_info: VideoInfo) -> Optional[str]:
+	def calculate_scale_filter(self, video_info: VideoInfo, resolution_mode: ResolutionMode) -> Optional[str]:
 		"""
 		스케일 필터 계산
 
 		Args:
 			video_info: 동영상 정보
+			resolution_mode: 해상도 모드
 
 		Returns:
 			스케일 필터 문자열 또는 None
 		"""
-		if (video_info.pixel_count > ConfigDef.RESOLUTION_THRESHOLD):
-			target_height = int(video_info.height * ConfigDef.TARGET_WIDTH / video_info.width)
-			target_height = target_height - (target_height % 2)
-			return f"scale={ConfigDef.TARGET_WIDTH}:{target_height}"
-		return None
+		if (video_info.pixel_count < ConfigDef.HD_THRESHOLD):
+			return None
+
+		if (resolution_mode == ResolutionMode.FHD):
+			target_width = ConfigDef.FHD_WIDTH
+		else:
+			target_width = ConfigDef.HD_WIDTH
+
+		if (video_info.width <= target_width):
+			return None
+
+		target_height = int(video_info.height * target_width / video_info.width)
+		target_height = target_height - (target_height % 2)
+		return f"scale={target_width}:{target_height}"
 
 
 	async def get_video_files(self) -> List[Path]:
@@ -463,13 +521,45 @@ class VideoEncoder:
 			file_info = FileInfo(video_file.name)
 			file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
 			file_info.subtitle_file = self.find_subtitle(video_file)
-			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info)
+			file_info.resolution_mode = ResolutionMode.HD
+			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
 			file_info.output_filename = self.generate_output_filename(
 				video_file,
 				file_info.video_info,
-				file_info.subtitle_file
+				file_info.subtitle_file,
+				file_info.resolution_mode
 			)
 			self.files.append(file_info)
+
+
+	def set_resolution_mode(self, filename: str, resolution_mode: str) -> bool:
+		"""
+		파일의 해상도 모드 설정
+
+		Args:
+			filename: 파일명
+			resolution_mode: 해상도 모드 ('hd' 또는 'fhd')
+
+		Returns:
+			설정 성공 여부
+		"""
+		for file_info in self.files:
+			if (file_info.filename == filename):
+				if (resolution_mode == 'fhd'):
+					file_info.resolution_mode = ResolutionMode.FHD
+				else:
+					file_info.resolution_mode = ResolutionMode.HD
+
+				input_file = self.input_dir / file_info.filename
+				file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
+				file_info.output_filename = self.generate_output_filename(
+					input_file,
+					file_info.video_info,
+					file_info.subtitle_file,
+					file_info.resolution_mode
+				)
+				return True
+		return False
 
 
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
@@ -485,17 +575,16 @@ class VideoEncoder:
 		input_file = self.input_dir / file_info.filename
 		output_file = self.output_dir / file_info.output_filename
 
+		subtitle_file = self.find_subtitle(input_file)
+
 		cmd = [
 			self.config.get(ConfigKey.FFMPEG_PATH),
 			"-i", str(input_file)
 		]
 
-		if (file_info.subtitle_file is not None):
-			subtitle_path = self.subtitle_dir / file_info.subtitle_file.name
+		if (subtitle_file is not None):
+			subtitle_path = self.subtitle_dir / subtitle_file.name
 			cmd.extend(["-i", str(subtitle_path)])
-		cmd.extend(["-f", "mp4"])
-		if (True):
-			cmd.extend(["-vf", "scale=1280:720"])
 
 		cmd.extend([
 			"-f", "mp4",
@@ -516,7 +605,7 @@ class VideoEncoder:
 			"-b:a", self.config.get(ConfigKey.AUDIO_BITRATE)
 		])
 
-		if (file_info.subtitle_file is not None):
+		if (subtitle_file is not None):
 			cmd.extend(["-c:s", "mov_text"])
 
 		cmd.extend(["-y", str(output_file)])
@@ -602,7 +691,7 @@ class VideoEncoder:
 
 		file_info.status = FileStatus.IN_PROGRESS
 		self.stop_current = False
-		await websocket_manager.broadcast_status(self.get_all_status())
+		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 		cmd = self.build_ffmpeg_command(file_info)
 
@@ -610,16 +699,15 @@ class VideoEncoder:
 		log_file = self.log_dir / f"{input_file.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 		try:
+			priority_kwargs = self._set_low_priority()
+
 			with open(log_file, 'wb') as log:
 				log.write(" ".join(cmd).encode())
 				self.current_process = await asyncio.create_subprocess_exec(
 					*cmd,
 					stdout=subprocess.PIPE,
 					stderr=subprocess.STDOUT,
-					creationflags=(
-						subprocess.IDLE_PRIORITY_CLASS
-						| subprocess.CREATE_NO_WINDOW
-					)
+					**priority_kwargs
 				)
 
 				buffer = b''
@@ -656,7 +744,7 @@ class VideoEncoder:
 						line_str = line_bytes.decode('utf-8', errors='ignore')
 
 						if (self.parse_progress(line_str, file_info)):
-							await websocket_manager.broadcast_status(self.get_all_status())
+							await websocket_manager.broadcast_current_status(self.get_current_status())
 						else:
 							log.write(line_bytes + b'\n')
 							log.flush()
@@ -682,7 +770,7 @@ class VideoEncoder:
 			return False
 		finally:
 			self.current_process = None
-			await websocket_manager.broadcast_status(self.get_all_status())
+			await websocket_manager.broadcast_current_status(self.get_current_status())
 
 
 	def get_all_status(self) -> Dict[str, Any]:
@@ -705,8 +793,42 @@ class VideoEncoder:
 			overall_progress = overall_progress / total_files
 
 		return {
+			"type": "full",
 			"files": [f.to_dict() for f in self.files],
 			"current_index": self.current_file_index,
+			"overall_progress": round(overall_progress, 1),
+			"completed_count": completed,
+			"total_count": total_files
+		}
+
+
+	def get_current_status(self) -> Dict[str, Any]:
+		"""
+		현재 파일 상태 반환
+
+		Returns:
+			현재 파일 상태 딕셔너리
+		"""
+		total_files = len(self.files)
+		completed = sum(1 for f in self.files if f.status == FileStatus.COMPLETED)
+
+		overall_progress = 0.0
+		if (total_files > 0):
+			for idx, file_info in enumerate(self.files):
+				if (file_info.status == FileStatus.COMPLETED):
+					overall_progress += 100.0
+				elif (file_info.status == FileStatus.IN_PROGRESS):
+					overall_progress += file_info.progress.progress_percent
+			overall_progress = overall_progress / total_files
+
+		current_file = None
+		if (0 <= self.current_file_index < len(self.files)):
+			current_file = self.files[self.current_file_index].to_dict()
+
+		return {
+			"type": "current",
+			"current_index": self.current_file_index,
+			"current_file": current_file,
 			"overall_progress": round(overall_progress, 1),
 			"completed_count": completed,
 			"total_count": total_files
@@ -722,7 +844,7 @@ class VideoEncoder:
 		"""
 		self.stop_all = False
 		await self.prepare_files()
-		await websocket_manager.broadcast_status(self.get_all_status())
+		await websocket_manager.broadcast_all_status(self.get_all_status())
 
 		for idx, file_info in enumerate(self.files):
 			if (self.stop_all):
@@ -735,7 +857,7 @@ class VideoEncoder:
 			await self.encode_file(file_info, websocket_manager)
 
 		self.current_file_index = -1
-		await websocket_manager.broadcast_status(self.get_all_status())
+		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 
 	def stop_current_encoding(self) -> bool:
@@ -796,33 +918,53 @@ class WebSocketManager:
 		Args:
 			websocket: WebSocket 연결
 		"""
-		try:
-			self.active_connections.remove(websocket)
-		except:
-			pass
+		if (websocket in self.active_connections):
+			try:
+				self.active_connections.remove(websocket)
+			except:
+				pass
 
 
-	async def broadcast_status(self, status: Dict[str, Any]) -> None:
+	async def broadcast_all_status(self, status: Dict[str, Any]) -> None:
 		"""
-		모든 연결에 상태 브로드캐스트
+		모든 연결에 전체 상태 브로드캐스트
 
 		Args:
 			status: 상태 정보
 		"""
-
-		def path_handler(obj: Any) -> Any:
-			if (isinstance(obj, Path)):
-				return str(obj)
-			return obj
-
 		disconnected = []
 		for connection in self.active_connections:
 			try:
 				json_str = json.dumps(status, default=path_handler)
 				await connection.send_json(json.loads(json_str))
+			except (WebSocketDisconnect, RuntimeError, ConnectionResetError) as e:
+				print(f"broadcast_all_status() WebSocket 전송 오류: {e}")
+				disconnected.append(connection)
 			except Exception as e:
-				print(f"broadcast_status error: {e}")
-				traceback.print_exc()
+				print(f"예상치 못한 WebSocket 오류: {e}")
+				disconnected.append(connection)
+
+		for connection in disconnected:
+			self.disconnect(connection)
+
+
+	async def broadcast_current_status(self, status: Dict[str, Any]) -> None:
+		"""
+		모든 연결에 현재 파일 상태 브로드캐스트
+
+		Args:
+			status: 상태 정보
+		"""
+		disconnected = []
+		for connection in self.active_connections:
+			try:
+				json_str = json.dumps(status, default=path_handler)
+				await connection.send_json(json.loads(json_str))
+			except (WebSocketDisconnect, RuntimeError, ConnectionResetError) as e:
+				print(f"broadcast_current_status() WebSocket 전송 오류: {e}")
+				disconnected.append(connection)
+			except Exception as e:
+				print(f"예상치 못한 WebSocket 오류: {e}")
 				disconnected.append(connection)
 
 		for connection in disconnected:
@@ -831,36 +973,12 @@ class WebSocketManager:
 
 
 app = FastAPI()
+app.mount("/css", StaticFiles(directory="templates/css"), name="css")
+app.mount("/js", StaticFiles(directory="templates/js"), name="js")
+
 websocket_manager = WebSocketManager()
 encoder: Optional[VideoEncoder] = None
 encoding_task: Optional[asyncio.Task] = None
-
-
-def create_app() -> FastAPI:
-	"""
-	SECC UI를 위한 FastAPI 애플리케이션을 생성하고 설정합니다.
-
-	Returns:
-		FastAPI: 설정된 FastAPI 애플리케이션 객체입니다.
-	"""
-	global app
-
-	# 정적 파일 마운트 (CSS, JS, 이미지 등)
-	app.mount(
-		"/css",
-		StaticFiles(directory=ConfigDef.CSS_DIR),
-		name="css",
-	)
-	app.mount(
-		"/images",
-		StaticFiles(directory=ConfigDef.IMAGES_DIR),
-		name="images",
-	)
-	app.mount(
-		"/js",
-		StaticFiles(directory=ConfigDef.JS_DIR),
-		name="js",
-	)
 
 
 @app.get("/")
@@ -952,6 +1070,33 @@ async def stop_all_encoding() -> Dict[str, Any]:
 		return {"success": False, "message": "진행 중인 인코딩이 없습니다"}
 
 
+@app.post("/set-resolution")
+async def set_resolution(data: Dict[str, str]) -> Dict[str, Any]:
+	"""
+	파일 해상도 모드 설정
+
+	Args:
+		data: {"filename": "파일명", "resolution": "hd|fhd"}
+
+	Returns:
+		결과 딕셔너리
+	"""
+	if (encoder is None):
+		return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+	filename = data.get("filename")
+	resolution = data.get("resolution")
+
+	if (not filename or not resolution):
+		return {"success": False, "message": "파일명과 해상도를 지정해야 합니다"}
+
+	if (encoder.set_resolution_mode(filename, resolution)):
+		await websocket_manager.broadcast_all_status(encoder.get_all_status())
+		return {"success": True, "message": "해상도 모드를 변경했습니다"}
+	else:
+		return {"success": False, "message": "파일을 찾을 수 없습니다"}
+
+
 def parse_arguments() -> argparse.Namespace:
 	"""
 	명령줄 인자 파싱
@@ -1001,7 +1146,6 @@ def main():
 	print("="*70 + "\n")
 
 	import uvicorn
-	create_app()
 	uvicorn.run(app, host="0.0.0.0", port=args.port)
 
 
