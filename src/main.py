@@ -7,6 +7,7 @@
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from shutil import copy2
 from typing import Any, Dict, Final, List, Optional
 
 import argparse
@@ -153,6 +154,7 @@ class FileInfo:
 		self.scale_filter: Optional[str] = None
 		self.resolution_mode: ResolutionMode = ResolutionMode.HD
 
+
 	def to_dict(self) -> Dict[str, Any]:
 		"""
 		딕셔너리로 변환
@@ -161,8 +163,8 @@ class FileInfo:
 			파일 정보 딕셔너리
 		"""
 		return {
-			"filename": self.filename,
-			"output_filename": self.output_filename,
+			"filename": str(self.filename) if (self.filename) else None,
+			"output_filename": str(self.output_filename) if (self.output_filename) else None,
 			"status": self.status.value,
 			"progress": {
 				"frame": self.progress.frame,
@@ -180,7 +182,7 @@ class FileInfo:
 				"bitrate": self.video_info.bitrate,
 				"fps": self.video_info.fps
 			},
-			"subtitle": self.subtitle_file,
+			"subtitle": str(self.subtitle_file) if (self.subtitle_file) else None,
 			"scale": self.scale_filter,
 			"resolution_mode": self.resolution_mode.value
 		}
@@ -409,6 +411,23 @@ class VideoEncoder:
 		return info
 
 
+	def check_uncensored_pattern(self, filename: str) -> bool:
+		"""
+		파일명에서 무수정 패턴 확인
+
+		Args:
+			filename: 파일명
+
+		Returns:
+			무수정 패턴 존재 여부
+		"""
+		uncensored_patterns = ['-HU', '-FHU', '-hu', '-fhu']
+		for pattern in uncensored_patterns:
+			if (pattern in filename):
+				return True
+		return False
+
+
 	def find_subtitle(self, video_file: Path) -> Optional[Path]:
 		"""
 		동영상 파일에 대응하는 자막 파일 찾기
@@ -436,7 +455,10 @@ class VideoEncoder:
 		return None
 
 
-	def generate_output_filename(self, input_file: Path, video_info: VideoInfo, subtitle_file: Optional[Path], resolution_mode: ResolutionMode) -> str:
+	def generate_output_filename(self, input_file: Path, video_info: VideoInfo
+							, subtitle_file: Optional[Path]
+							, resolution_mode: ResolutionMode
+							, use_uncensored: bool=False) -> str:
 		"""
 		출력 파일명 생성
 
@@ -445,6 +467,7 @@ class VideoEncoder:
 			video_info: 동영상 정보
 			subtitle_file: 자막 파일 경로
 			resolution_mode: 해상도 모드
+			use_uncensored: 무수정 패턴 사용 여부
 
 		Returns:
 			출력 파일명
@@ -456,14 +479,15 @@ class VideoEncoder:
 			return input_file.name
 
 		base_name = match.group(1)
+		quality_char = "U" if (use_uncensored) else "D"
 
 		if (video_info.pixel_count >= ConfigDef.HD_THRESHOLD):
 			if (resolution_mode == ResolutionMode.FHD):
-				quality_suffix = "-FHD"
+				quality_suffix = f"-FH{quality_char}"
 			else:
-				quality_suffix = "-HD"
+				quality_suffix = f"-H{quality_char}"
 		else:
-			quality_suffix = "-SD"
+			quality_suffix = f"-S{quality_char}"
 
 		subtitle_suffix = "-S" if subtitle_file else ""
 
@@ -518,7 +542,7 @@ class VideoEncoder:
 		self.files = []
 
 		for video_file in video_files:
-			file_info = FileInfo(video_file.name)
+			file_info = FileInfo(str(video_file.name))
 			file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
 			file_info.subtitle_file = self.find_subtitle(video_file)
 			file_info.resolution_mode = ResolutionMode.HD
@@ -527,7 +551,8 @@ class VideoEncoder:
 				video_file,
 				file_info.video_info,
 				file_info.subtitle_file,
-				file_info.resolution_mode
+				file_info.resolution_mode,
+				use_uncensored=self.check_uncensored_pattern(video_file.name)
 			)
 			self.files.append(file_info)
 
@@ -556,7 +581,8 @@ class VideoEncoder:
 					input_file,
 					file_info.video_info,
 					file_info.subtitle_file,
-					file_info.resolution_mode
+					file_info.resolution_mode,
+					use_uncensored=self.check_uncensored_pattern(file_info.filename)
 				)
 				return True
 		return False
@@ -759,6 +785,9 @@ class VideoEncoder:
 				if (self.current_process.returncode == 0):
 					file_info.status = FileStatus.COMPLETED
 					file_info.progress.progress_percent = 100.0
+					# 스크립트 파일을 복사합니다.
+					if (file_info.subtitle_file):
+						copy2(str(file_info.subtitle_file), str(self.output_dir / (file_info.output_filename).replace('.mp4', '.srt')))
 					return True
 				else:
 					file_info.status = FileStatus.FAILED
@@ -792,7 +821,7 @@ class VideoEncoder:
 					overall_progress += file_info.progress.progress_percent
 			overall_progress = overall_progress / total_files
 
-		return {
+		all_status = {
 			"type": "full",
 			"files": [f.to_dict() for f in self.files],
 			"current_index": self.current_file_index,
@@ -800,6 +829,8 @@ class VideoEncoder:
 			"completed_count": completed,
 			"total_count": total_files
 		}
+
+		return all_status
 
 
 	def get_current_status(self) -> Dict[str, Any]:
@@ -1006,8 +1037,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 	"""
 	await websocket_manager.connect(websocket)
 
-	if (encoder is not None):
-		await websocket.send_json(encoder.get_all_status())
+	try:
+		if (encoder is not None):
+			await websocket.send_json(encoder.get_all_status())
+	except Exception as e:
+		print(f"websocket_endpoint send_json() error: {e}")
+		print(f"{encoder.get_all_status()=}")
 
 	try:
 		while True:
