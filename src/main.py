@@ -310,22 +310,18 @@ class VideoEncoder:
 		Args:
 			config: 설정 관리자
 		"""
+		if (config is None):
+			config = ConfigManager()
 		self.config = config
-		self.input_dir = Path(config.get(ConfigKey.INPUT_DIR))
-		self.output_dir = Path(config.get(ConfigKey.OUTPUT_DIR))
-		self.subtitle_dir = Path(config.get(ConfigKey.SUBTITLE_DIR))
-		self.log_dir = Path(config.get(ConfigKey.LOG_DIR))
+		self.parse_arguments()
+
 		self.files: List[FileInfo] = []
 		self.current_file_index: int = -1
 		self.current_process: Optional[asyncio.subprocess.Process] = None
 		self.stop_current: bool = False
 		self.stop_all: bool = False
-		self.resolution_mode: ResolutionMode = ResolutionMode.FHD
+		self.resolution_mode: ResolutionMode = ResolutionMode.HD
 		self._ensure_directories()
-
-		if (self.config is None):
-			self.config = ConfigManager()
-			self.parse_arguments()
 
 
 	def _ensure_directories(self) -> None:
@@ -551,16 +547,6 @@ class VideoEncoder:
 		video_files = await self.get_video_files()
 		self.files = []
 
-		try:
-			self.config._load_or_create_config() # 설정 파일 다시 읽어들이기
-			self.parse_arguments()
-			self.print_config()
-			self.resolution_mode = ResolutionMode(self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value))
-			print(f"default resolution = {self.resolution_mode.value}")
-		except Exception as e:
-			print(f"DEFAULT_RESOLUTION = {self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value)}")
-			print(f"config error: {e}")
-			self.resolution_mode = ResolutionMode.HD
 		for video_file in video_files:
 			file_info = FileInfo(str(video_file.name))
 			subtitle_file = self.find_subtitle(video_file)
@@ -893,6 +879,14 @@ class VideoEncoder:
 			websocket_manager: WebSocket 관리자
 		"""
 		self.stop_all = False
+
+		try:
+			self.config._load_or_create_config() # 설정 파일 다시 읽어들이기
+			self.parse_arguments()
+			self.print_config()
+		except Exception as e:
+			print(f"config error: {e}")
+
 		await self.prepare_files()
 		await websocket_manager.broadcast_all_status(self.get_all_status())
 
@@ -929,6 +923,13 @@ class VideoEncoder:
 		args = parser.parse_args()
 
 		self.config.update_from_args(args)
+
+		self.input_dir = Path(self.config.get(ConfigKey.INPUT_DIR))
+		self.output_dir = Path(self.config.get(ConfigKey.OUTPUT_DIR))
+		self.subtitle_dir = Path(self.config.get(ConfigKey.SUBTITLE_DIR))
+		self.log_dir = Path(self.config.get(ConfigKey.LOG_DIR))
+		self.resolution_mode = ResolutionMode(self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value))
+
 		return args
 
 
@@ -947,6 +948,7 @@ class VideoEncoder:
 		print(f"CRF: {config.get(ConfigKey.CRF)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
+		print(f"default resolution: {self.resolution_mode.value}")
 
 
 	def stop_current_encoding(self) -> bool:
