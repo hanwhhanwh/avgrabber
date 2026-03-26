@@ -6,6 +6,7 @@
 # Original Packages
 from datetime import datetime
 from enum import Enum
+from os import path
 from pathlib import Path
 from shutil import copy2
 from typing import Any, Dict, Final, List, Optional
@@ -44,6 +45,7 @@ class ConfigKey:
 	VOLUME: Final[str] = "volume"
 	AUDIO_BITRATE: Final[str] = "audio_bitrate"
 	TEMPLATES_DIR: Final[str] = "templates_dir"
+	DEFAULT_RESOLUTION: Final[str] = "default_resolution"
 
 
 
@@ -214,15 +216,16 @@ class ConfigManager:
 			기본 설정 딕셔너리
 		"""
 		return {
-			ConfigKey.FFMPEG_PATH: ConfigDef.DEFAULT_FFMPEG,
-			ConfigKey.FFPROBE_PATH: ConfigDef.DEFAULT_FFPROBE,
-			ConfigKey.INPUT_DIR: ConfigDef.DEFAULT_INPUT_DIR,
-			ConfigKey.OUTPUT_DIR: ConfigDef.DEFAULT_OUTPUT_DIR,
-			ConfigKey.SUBTITLE_DIR: ConfigDef.DEFAULT_SUBTITLE_DIR,
-			ConfigKey.LOG_DIR: ConfigDef.DEFAULT_LOG_DIR,
-			ConfigKey.CRF: ConfigDef.DEFAULT_CRF,
-			ConfigKey.VOLUME: ConfigDef.DEFAULT_VOLUME,
-			ConfigKey.AUDIO_BITRATE: ConfigDef.DEFAULT_AUDIO_BITRATE
+			ConfigKey.FFMPEG_PATH: ConfigDef.DEFAULT_FFMPEG
+			, ConfigKey.FFPROBE_PATH: ConfigDef.DEFAULT_FFPROBE
+			, ConfigKey.INPUT_DIR: ConfigDef.DEFAULT_INPUT_DIR
+			, ConfigKey.OUTPUT_DIR: ConfigDef.DEFAULT_OUTPUT_DIR
+			, ConfigKey.SUBTITLE_DIR: ConfigDef.DEFAULT_SUBTITLE_DIR
+			, ConfigKey.LOG_DIR: ConfigDef.DEFAULT_LOG_DIR
+			, ConfigKey.CRF: ConfigDef.DEFAULT_CRF
+			, ConfigKey.VOLUME: ConfigDef.DEFAULT_VOLUME
+			, ConfigKey.AUDIO_BITRATE: ConfigDef.DEFAULT_AUDIO_BITRATE
+			, ConfigKey.DEFAULT_RESOLUTION: ResolutionMode.HD.value
 		}
 
 
@@ -272,17 +275,18 @@ class ConfigManager:
 			self.config[ConfigKey.VOLUME] = args.volume
 
 
-	def get(self, key: str) -> Any:
+	def get(self, key: str, default: Any=None) -> Any:
 		"""
 		설정 값 가져오기
 
 		Args:
 			key: 설정 키
+			default: 기본 반환값
 
 		Returns:
 			설정 값
 		"""
-		return self.config.get(key)
+		return self.config.get(key, default)
 
 
 
@@ -315,6 +319,7 @@ class VideoEncoder:
 		self.current_process: Optional[asyncio.subprocess.Process] = None
 		self.stop_current: bool = False
 		self.stop_all: bool = False
+		self.resolution_mode: ResolutionMode = ResolutionMode.FHD
 		self._ensure_directories()
 
 
@@ -541,11 +546,19 @@ class VideoEncoder:
 		video_files = await self.get_video_files()
 		self.files = []
 
+		try:
+			self.resolution_mode = ResolutionMode(self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value))
+			print(f"default resolution = {self.resolution_mode.value}")
+		except Exception as e:
+			print(f"DEFAULT_RESOLUTION = {self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value)}")
+			print(f"resolution_mode error: {e}")
+			self.resolution_mode = ResolutionMode.HD
 		for video_file in video_files:
 			file_info = FileInfo(str(video_file.name))
+			subtitle_file = self.find_subtitle(video_file)
 			file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
-			file_info.subtitle_file = self.find_subtitle(video_file)
-			file_info.resolution_mode = ResolutionMode.HD
+			file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
+			file_info.resolution_mode = self.resolution_mode
 			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
 			file_info.output_filename = self.generate_output_filename(
 				video_file,
@@ -570,7 +583,7 @@ class VideoEncoder:
 		"""
 		for file_info in self.files:
 			if (file_info.filename == filename):
-				if (resolution_mode == 'fhd'):
+				if (resolution_mode.lower() == 'fhd'):
 					file_info.resolution_mode = ResolutionMode.FHD
 				else:
 					file_info.resolution_mode = ResolutionMode.HD
@@ -621,10 +634,8 @@ class VideoEncoder:
 		])
 
 		if (file_info.scale_filter is not None):
-			volume_filter = f"volume={self.config.get(ConfigKey.VOLUME)}"
-			cmd.extend(["-vf", file_info.scale_filter, "-af", volume_filter])
-		else:
-			cmd.extend(["-af", f"volume={self.config.get(ConfigKey.VOLUME)}"])
+			cmd.extend(["-vf", file_info.scale_filter])
+		cmd.extend(["-af", f"volume={self.config.get(ConfigKey.VOLUME)}"])
 
 		cmd.extend([
 			"-c:a", "aac",
@@ -786,7 +797,7 @@ class VideoEncoder:
 					file_info.status = FileStatus.COMPLETED
 					file_info.progress.progress_percent = 100.0
 					# 스크립트 파일을 복사합니다.
-					if (file_info.subtitle_file):
+					if ((file_info.subtitle_file) and path.exists(file_info.subtitle_file)):
 						copy2(str(file_info.subtitle_file), str(self.output_dir / (file_info.output_filename).replace('.mp4', '.srt')))
 					return True
 				else:
@@ -1173,6 +1184,7 @@ def main():
 	print(f"출력 디렉토리: {config.get(ConfigKey.OUTPUT_DIR)}")
 	print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
 	print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
+	print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
 	print(f"CRF: {config.get(ConfigKey.CRF)}")
 	print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 	print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
