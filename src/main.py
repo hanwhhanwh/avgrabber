@@ -302,7 +302,7 @@ class VideoEncoder:
 	동영상 인코더 클래스
 	"""
 
-	def __init__(self, config: ConfigManager):
+	def __init__(self, config: ConfigManager=None):
 		"""
 		VideoEncoder 초기화
 
@@ -321,6 +321,10 @@ class VideoEncoder:
 		self.stop_all: bool = False
 		self.resolution_mode: ResolutionMode = ResolutionMode.FHD
 		self._ensure_directories()
+
+		if (self.config is None):
+			self.config = ConfigManager()
+			self.parse_arguments()
 
 
 	def _ensure_directories(self) -> None:
@@ -547,11 +551,14 @@ class VideoEncoder:
 		self.files = []
 
 		try:
+			self.config._load_or_create_config() # 설정 파일 다시 읽어들이기
+			self.parse_arguments()
+			self.print_config()
 			self.resolution_mode = ResolutionMode(self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value))
 			print(f"default resolution = {self.resolution_mode.value}")
 		except Exception as e:
 			print(f"DEFAULT_RESOLUTION = {self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value)}")
-			print(f"resolution_mode error: {e}")
+			print(f"config error: {e}")
 			self.resolution_mode = ResolutionMode.HD
 		for video_file in video_files:
 			file_info = FileInfo(str(video_file.name))
@@ -902,6 +909,45 @@ class VideoEncoder:
 		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 
+	def parse_arguments(self) -> argparse.Namespace:
+		"""
+		명령줄 인자 파싱
+
+		Returns:
+			파싱된 인자
+		"""
+		parser = argparse.ArgumentParser(description="FFmpeg 웹 기반 동영상 인코딩 시스템")
+		parser.add_argument("--ffmpeg", type=str, help="FFmpeg 실행 파일 경로")
+		parser.add_argument("--ffprobe", type=str, help="FFprobe 실행 파일 경로")
+		parser.add_argument("--input", type=str, help="입력 디렉토리")
+		parser.add_argument("--output", type=str, help="출력 디렉토리")
+		parser.add_argument("--sub", type=str, help="자막 디렉토리")
+		parser.add_argument("--crf", type=int, help="CRF 값")
+		parser.add_argument("--volume", type=float, help="볼륨 값")
+		parser.add_argument("--port", type=int, default=8000, help="웹 서버 포트")
+		args = parser.parse_args()
+
+		self.config.update_from_args(args)
+		return args
+
+
+	def print_config(self) -> None:
+		"""
+		설정 정보를 출력합니다.
+		"""
+		config = self.config
+		print(f"FFmpeg 경로: {config.get(ConfigKey.FFMPEG_PATH)}")
+		print(f"FFprobe 경로: {config.get(ConfigKey.FFPROBE_PATH)}")
+		print(f"입력 디렉토리: {config.get(ConfigKey.INPUT_DIR)}")
+		print(f"출력 디렉토리: {config.get(ConfigKey.OUTPUT_DIR)}")
+		print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
+		print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
+		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
+		print(f"CRF: {config.get(ConfigKey.CRF)}")
+		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
+		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
+
+
 	def stop_current_encoding(self) -> bool:
 		"""
 		현재 인코딩 중단
@@ -1143,51 +1189,19 @@ async def set_resolution(data: Dict[str, str]) -> Dict[str, Any]:
 		return {"success": False, "message": "파일을 찾을 수 없습니다"}
 
 
-def parse_arguments() -> argparse.Namespace:
-	"""
-	명령줄 인자 파싱
-
-	Returns:
-		파싱된 인자
-	"""
-	parser = argparse.ArgumentParser(description="FFmpeg 웹 기반 동영상 인코딩 시스템")
-	parser.add_argument("--ffmpeg", type=str, help="FFmpeg 실행 파일 경로")
-	parser.add_argument("--ffprobe", type=str, help="FFprobe 실행 파일 경로")
-	parser.add_argument("--input", type=str, help="입력 디렉토리")
-	parser.add_argument("--output", type=str, help="출력 디렉토리")
-	parser.add_argument("--sub", type=str, help="자막 디렉토리")
-	parser.add_argument("--crf", type=int, help="CRF 값")
-	parser.add_argument("--volume", type=float, help="볼륨 값")
-	parser.add_argument("--port", type=int, default=8000, help="웹 서버 포트")
-	return parser.parse_args()
-
-
 def main():
 	"""
 	메인 함수
 	"""
 	global encoder
 
-	args = parse_arguments()
-
-	config = ConfigManager()
-	config.update_from_args(args)
-
-	encoder = VideoEncoder(config)
+	encoder = VideoEncoder()
+	args = encoder.parse_arguments()
 
 	print("\n" + "="*70)
 	print("FFmpeg 웹 기반 동영상 인코딩 시스템")
 	print("="*70)
-	print(f"FFmpeg 경로: {config.get(ConfigKey.FFMPEG_PATH)}")
-	print(f"FFprobe 경로: {config.get(ConfigKey.FFPROBE_PATH)}")
-	print(f"입력 디렉토리: {config.get(ConfigKey.INPUT_DIR)}")
-	print(f"출력 디렉토리: {config.get(ConfigKey.OUTPUT_DIR)}")
-	print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
-	print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
-	print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
-	print(f"CRF: {config.get(ConfigKey.CRF)}")
-	print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
-	print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
+	encoder.print_config()
 	print("="*70)
 	print(f"\n웹 인터페이스: http://localhost:{args.port}")
 	print("="*70 + "\n")
