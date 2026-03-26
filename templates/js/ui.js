@@ -172,8 +172,8 @@ function updateFileList(data) {
 				<div class="resolution-selector">
 					<label>해상도:</label>
 					<select onchange="changeResolution('${file.filename}', this.value)">
-						<option value="hd" ${file.resolution_mode === 'hd' ? 'selected' : ''}>HD (1280)</option>
-						<option value="fhd" ${file.resolution_mode === 'fhd' ? 'selected' : ''}>FHD (1920)</option>
+						<option value="hd" ${file.resolution_mode.toLowerCase() === 'hd' ? 'selected' : ''}>HD (1280)</option>
+						<option value="fhd" ${file.resolution_mode.toLowerCase() === 'fhd' ? 'selected' : ''}>FHD (1920)</option>
 					</select>
 				</div>
 			`;
@@ -181,7 +181,7 @@ function updateFileList(data) {
 		
 		let videoInfoHtml = '';
 		if (file.video_info) {
-			const subtitle = file.subtitle ? '✓ 자막' : '✗ 자막';
+			const subtitle = file.subtitle ? '🟢 자막' : '✗ 자막';
 			const scale = file.scale ? `📐 ${file.scale}` : '📐 원본 크기';
 			
 			videoInfoHtml = `
