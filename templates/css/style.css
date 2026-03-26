@@ -1,0 +1,372 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+body {
+	font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	min-height: 100vh;
+	padding: 20px;
+}
+
+.container {
+	max-width: 1400px;
+	margin: 0 auto;
+	background: white;
+	border-radius: 10px;
+	box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+	overflow: hidden;
+}
+
+.header {
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: white;
+	padding: 30px;
+	text-align: center;
+}
+
+.header h1 {
+	font-size: 32px;
+	margin-bottom: 10px;
+}
+
+.header p {
+	opacity: 0.9;
+}
+
+.overall-progress {
+	padding: 20px 30px;
+	background: #f8f9fa;
+	border-bottom: 2px solid #dee2e6;
+}
+
+.overall-progress-label {
+	font-size: 14px;
+	color: #6c757d;
+	margin-bottom: 8px;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.overall-progress-bar-container {
+	width: 100%;
+	height: 35px;
+	background: #e9ecef;
+	border-radius: 17px;
+	overflow: hidden;
+	box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.overall-progress-bar {
+	height: 100%;
+	background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+	transition: width 0.5s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: white;
+	font-weight: bold;
+	font-size: 16px;
+}
+
+.controls {
+	padding: 20px 30px;
+	background: #f8f9fa;
+	border-bottom: 1px solid #dee2e6;
+	display: flex;
+	gap: 10px;
+}
+
+.btn {
+	padding: 12px 30px;
+	border: none;
+	border-radius: 5px;
+	font-size: 16px;
+	font-weight: bold;
+	cursor: pointer;
+	transition: all 0.3s;
+}
+
+.btn-primary {
+	background: #667eea;
+	color: white;
+}
+
+.btn-primary:hover {
+	background: #5568d3;
+}
+
+.btn-primary:disabled {
+	background: #ccc;
+	cursor: not-allowed;
+}
+
+.btn-warning {
+	background: #ffc107;
+	color: #333;
+}
+
+.btn-warning:hover {
+	background: #e0a800;
+}
+
+.btn-warning:disabled {
+	background: #ccc;
+	cursor: not-allowed;
+}
+
+.btn-danger {
+	background: #dc3545;
+	color: white;
+}
+
+.btn-danger:hover {
+	background: #c82333;
+}
+
+.btn-danger:disabled {
+	background: #ccc;
+	cursor: not-allowed;
+}
+
+.file-list {
+	padding: 20px 30px;
+	max-height: 600px;
+	overflow-y: auto;
+}
+
+.file-item {
+	background: white;
+	border: 2px solid #e9ecef;
+	border-radius: 8px;
+	padding: 20px;
+	margin-bottom: 15px;
+	transition: all 0.3s;
+}
+
+.file-item:hover {
+	box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.file-item.pending {
+	border-color: #e9ecef;
+}
+
+.file-item.in_progress {
+	border-color: #667eea;
+	background: linear-gradient(to right, rgba(102, 126, 234, 0.1) 0%, white 100%);
+	animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%, 100% {
+		box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4);
+	}
+	50% {
+		box-shadow: 0 0 0 10px rgba(102, 126, 234, 0);
+	}
+}
+
+.file-item.completed {
+	border-color: #28a745;
+	background: linear-gradient(to right, rgba(40, 167, 69, 0.05) 0%, white 100%);
+}
+
+.file-item.failed {
+	border-color: #dc3545;
+	background: linear-gradient(to right, rgba(220, 53, 69, 0.05) 0%, white 100%);
+}
+
+.file-item.stopped {
+	border-color: #ffc107;
+	background: linear-gradient(to right, rgba(255, 193, 7, 0.05) 0%, white 100%);
+}
+
+.file-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 10px;
+}
+
+.filename {
+	font-weight: bold;
+	font-size: 16px;
+	color: #333;
+}
+
+.output-filename {
+	font-size: 13px;
+	color: #667eea;
+	margin-left: 10px;
+}
+
+.status-badge {
+	padding: 5px 15px;
+	border-radius: 20px;
+	font-size: 12px;
+	font-weight: bold;
+	text-transform: uppercase;
+}
+
+.status-pending {
+	background: #e9ecef;
+	color: #6c757d;
+}
+
+.status-in_progress {
+	background: #667eea;
+	color: white;
+}
+
+.status-completed {
+	background: #28a745;
+	color: white;
+}
+
+.status-failed {
+	background: #dc3545;
+	color: white;
+}
+
+.status-stopped {
+	background: #ffc107;
+	color: #333;
+}
+
+.progress-bar-container {
+	width: 100%;
+	height: 25px;
+	background: #e9ecef;
+	border-radius: 12px;
+	overflow: hidden;
+	margin: 10px 0;
+}
+
+.progress-bar {
+	height: 100%;
+	background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+	transition: width 0.3s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: white;
+	font-weight: bold;
+	font-size: 12px;
+}
+
+.video-info {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	gap: 10px;
+	font-size: 13px;
+	color: #6c757d;
+	margin-bottom: 10px;
+	padding: 10px;
+	background: #f8f9fa;
+	border-radius: 5px;
+}
+
+.info-item {
+	display: flex;
+	align-items: center;
+}
+
+.info-icon {
+	margin-right: 5px;
+}
+
+.info-label {
+	font-weight: bold;
+	color: #495057;
+	margin-right: 5px;
+}
+
+.progress-info {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 10px;
+	margin-top: 10px;
+	padding: 10px;
+	background: #f8f9fa;
+	border-radius: 5px;
+}
+
+.progress-item {
+	font-size: 13px;
+	color: #495057;
+}
+
+.progress-label {
+	font-weight: bold;
+	color: #667eea;
+}
+
+.empty-state {
+	text-align: center;
+	padding: 60px 20px;
+	color: #6c757d;
+}
+
+.empty-state svg {
+	width: 100px;
+	height: 100px;
+	opacity: 0.3;
+	margin-bottom: 20px;
+}
+
+.connection-status {
+	padding: 10px 20px;
+	text-align: center;
+	font-size: 14px;
+}
+
+.connected {
+	background: #d4edda;
+	color: #155724;
+}
+
+.disconnected {
+	background: #f8d7da;
+	color: #721c24;
+}
+
+.resolution-selector {
+	margin-top: 10px;
+	padding: 10px;
+	background: #e3f2fd;
+	border-radius: 5px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.resolution-selector label {
+	font-weight: bold;
+	color: #1976d2;
+}
+
+.resolution-selector select {
+	padding: 5px 10px;
+	border: 2px solid #1976d2;
+	border-radius: 4px;
+	background: white;
+	color: #333;
+	font-size: 14px;
+	cursor: pointer;
+	transition: all 0.3s;
+}
+
+.resolution-selector select:hover {
+	border-color: #1565c0;
+	background: #f5f5f5;
+}
+
+.resolution-selector select:focus {
+	outline: none;
+	border-color: #0d47a1;
+	box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+}

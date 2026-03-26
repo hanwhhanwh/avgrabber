@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<title>FFmpeg 인코딩 현황</title>
+	<meta charset="utf-8">
+	<link href="css/style.css" rel="stylesheet" />
+	<script src="js/ui.js"></script>
+</head>
+<body>
+
+<div class="container">
+	<div class="header">
+		<h1>🎬 FFmpeg 인코딩 모니터</h1>
+		<p>실시간 동영상 인코딩 진행 상황</p>
+	</div>
+	
+	<div class="connection-status" id="connectionStatus">
+		<span class="disconnected">연결 중...</span>
+	</div>
+	
+	<div class="overall-progress">
+		<div class="overall-progress-label">
+			<span><strong>전체 진행률</strong></span>
+			<span id="progressText">0 / 0 완료</span>
+		</div>
+		<div class="overall-progress-bar-container">
+			<div class="overall-progress-bar" id="overallProgressBar" style="width: 0%">
+				0%
+			</div>
+		</div>
+	</div>
+	
+	<div class="controls">
+		<button class="btn btn-primary" id="startBtn" onclick="startEncoding()">
+			▶️ 인코딩 시작
+		</button>
+		<button class="btn btn-warning" id="stopCurrentBtn" onclick="stopCurrent()" disabled>
+			⏸️ 현재 파일 중단
+		</button>
+		<button class="btn btn-danger" id="stopAllBtn" onclick="stopAll()" disabled>
+			⏹️ 전체 중단
+		</button>
+	</div>
+	
+	<div class="file-list" id="fileList">
+		<div class="empty-state">
+			<svg fill="currentColor" viewBox="0 0 20 20">
+				<path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/>
+			</svg>
+			<p>인코딩할 파일이 없습니다</p>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>
