@@ -26,6 +26,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse,	JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 
 
@@ -1025,7 +1026,8 @@ class WebSocketManager:
 			try:
 				json_str = json.dumps(status, default=path_handler)
 				await connection.send_json(json.loads(json_str))
-			except (WebSocketDisconnect, RuntimeError, ConnectionResetError) as e:
+			except (WebSocketDisconnect, RuntimeError, ConnectionResetError,
+					ConnectionClosedError, ConnectionClosedOK) as e:
 				print(f"broadcast_all_status() WebSocket 전송 오류: {e}")
 				disconnected.append(connection)
 			except Exception as e:
@@ -1048,7 +1050,8 @@ class WebSocketManager:
 			try:
 				json_str = json.dumps(status, default=path_handler)
 				await connection.send_json(json.loads(json_str))
-			except (WebSocketDisconnect, RuntimeError, ConnectionResetError) as e:
+			except (WebSocketDisconnect, RuntimeError, ConnectionResetError,
+					ConnectionClosedError, ConnectionClosedOK) as e:
 				print(f"broadcast_current_status() WebSocket 전송 오류: {e}")
 				disconnected.append(connection)
 			except Exception as e:
@@ -1101,11 +1104,35 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 		print(f"websocket_endpoint send_json() error: {e}")
 		print(f"{encoder.get_all_status()=}")
 
+	async def _keepalive_ping() -> None:
+		"""
+		WebSocket 연결 유지를 위한 주기적 ping 전송 태스크.
+		인코딩 중 메시지 전송 공백이 길어져 ping timeout이 발생하는 것을 방지합니다.
+		"""
+		try:
+			while True:
+				await asyncio.sleep(10)
+				try:
+					await websocket.send_json({"type": "ping"})
+				except (WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK):
+					break
+				except Exception:
+					break
+		except asyncio.CancelledError:
+			pass
+
+	ping_task = asyncio.create_task(_keepalive_ping())
+
 	try:
 		while True:
 			await websocket.receive_text()
 	except WebSocketDisconnect:
 		websocket_manager.disconnect(websocket)
+	except (ConnectionClosedError, ConnectionClosedOK):
+		websocket_manager.disconnect(websocket)
+	finally:
+		ping_task.cancel()
+		await asyncio.gather(ping_task, return_exceptions=True)
 
 
 @app.post("/start")
