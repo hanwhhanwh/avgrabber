@@ -499,7 +499,7 @@ class TestErrorHandling:
 			assert backup_file.read_text(encoding='utf-8') == "[]"
 
 	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
-		"""백업 생성이 실패하면 원본 설정 파일을 덮어쓰지 않아야 함."""
+		"""백업 생성이 실패하면 기본 설정으로 동작하되 원본 설정 파일은 덮어쓰지 않아야 함."""
 		config_manager.config_file.write_text("[]")
 
 		def raise_backup_error(*args, **kwargs):
@@ -507,10 +507,25 @@ class TestErrorHandling:
 
 		monkeypatch.setattr("src.config.shutil.copy2", raise_backup_error)
 
-		with pytest.raises(OSError):
-			config_manager.reload()
+		config_manager.reload()
 
 		assert config_manager.config_file.read_text(encoding='utf-8') == "[]"
+		assert config_manager.config[ConfigKey.CRF] == ConfigDef.DEFAULT_CRF
+
+	def test_backup_failure_strict_raises(self, config_file, monkeypatch):
+		"""strict 모드에서는 백업 실패 시 예외를 전파해야 함."""
+		manager = ConfigManager(config_file, strict=True)
+		manager.config_file.write_text("[]")
+
+		def raise_backup_error(*args, **kwargs):
+			raise OSError("backup failed")
+
+		monkeypatch.setattr("src.config.shutil.copy2", raise_backup_error)
+
+		with pytest.raises(OSError):
+			manager.reload()
+
+		assert manager.config_file.read_text(encoding='utf-8') == "[]"
 
 
 # ==================== ====================
