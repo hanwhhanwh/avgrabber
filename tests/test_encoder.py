@@ -17,7 +17,7 @@ if (_project_root not in sys.path):
 	sys.path.insert(0, _project_root)
 
 from src.encoder import VideoEncoder
-from src.models import ConfigDef, ConfigKey, FileInfo, FileStatus, VideoCodec
+from src.models import ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection, VideoCodec
 
 
 class StubConfig:
@@ -267,6 +267,42 @@ def test_encode_all_follows_list_changes(tmp_path: Path, monkeypatch: pytest.Mon
 
 	assert encoded == ["b.mp4", "c.mp4", "late.mp4"]
 	assert encoder.current_file_index == -1
+
+
+@pytest.mark.parametrize("direction, expected", [
+	(MoveDirection.FIRST, ["c.mp4", "a.mp4", "b.mp4", "d.mp4"]),
+	(MoveDirection.UP, ["a.mp4", "c.mp4", "b.mp4", "d.mp4"]),
+	(MoveDirection.DOWN, ["a.mp4", "b.mp4", "d.mp4", "c.mp4"]),
+	(MoveDirection.LAST, ["a.mp4", "b.mp4", "d.mp4", "c.mp4"]),
+])
+def test_move_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direction: MoveDirection, expected: List[str]):
+	"""대기 파일을 방향에 따라 이동하고, 인코딩 중인 파일의 인덱스를 맞춘다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.files = [FileInfo("a.mp4", FileStatus.IN_PROGRESS), FileInfo("b.mp4"), FileInfo("c.mp4"), FileInfo("d.mp4")]
+	encoder.current_file_index = 0
+
+	assert encoder.move_file("c.mp4", direction) is True
+	assert filenames(encoder) == expected
+	assert encoder.files[encoder.current_file_index].filename == "a.mp4"
+
+
+def test_move_file_at_edge_keeps_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""맨 끝 파일을 한칸아래로 옮겨도 순서가 유지된다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.files = [FileInfo("a.mp4"), FileInfo("b.mp4")]
+
+	assert encoder.move_file("b.mp4", MoveDirection.DOWN) is True
+	assert filenames(encoder) == ["a.mp4", "b.mp4"]
+
+
+@pytest.mark.parametrize("filename", ["a.mp4", "none.mp4"])
+def test_move_file_rejects_non_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str):
+	"""대기 상태가 아니거나 없는 파일은 이동하지 않는다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.files = [FileInfo("a.mp4", FileStatus.COMPLETED), FileInfo("b.mp4")]
+
+	assert encoder.move_file(filename, MoveDirection.LAST) is False
+	assert filenames(encoder) == ["a.mp4", "b.mp4"]
 
 
 if __name__ == "__main__":

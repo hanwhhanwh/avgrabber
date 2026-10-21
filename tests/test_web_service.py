@@ -182,6 +182,23 @@ class TestHTTPEndpoints:
             response = c.post("/refresh")
             assert response.json()["success"] is False
 
+    def test_move_file_success(self, client, mock_encoder):
+        """파일 순서 변경 성공."""
+        mock_encoder.move_file = Mock(return_value=True)
+        response = client.post("/move-file", json={"filename": "test.mp4", "direction": "up"})
+        assert response.json()["success"] is True
+
+    def test_move_file_invalid_direction(self, client, mock_encoder):
+        """잘못된 이동 방향은 실패 응답."""
+        response = client.post("/move-file", json={"filename": "test.mp4", "direction": "left"})
+        assert response.json()["success"] is False
+
+    def test_move_file_not_pending(self, client, mock_encoder):
+        """대기 중인 파일이 아니면 실패 응답."""
+        mock_encoder.move_file = Mock(return_value=False)
+        response = client.post("/move-file", json={"filename": "test.mp4", "direction": "first"})
+        assert response.json()["success"] is False
+
     def test_set_resolution_success(self, client, mock_encoder):
         """해상도 설정 성공."""
         response = client.post("/set-resolution", json={
