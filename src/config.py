@@ -18,13 +18,16 @@ from src.models import ConfigKey, ConfigDef, ResolutionMode
 class ConfigManager:
 	"""JSON 설정 파일을 읽고 쓰며 설정 값을 제공하는 클래스."""
 
-	def __init__(self, config_file: str = ConfigDef.CONFIG_FILE):
+	def __init__(self, config_file: str = ConfigDef.CONFIG_FILE, strict: bool = False):
 		"""ConfigManager를 초기화하고 설정 파일을 로드하거나 기본 설정을 생성합니다.
 
 		Args:
 			config_file (str): 설정 파일 경로 (기본값: conf/encode.json)
+			strict (bool): True 이면 설정 백업 실패 시 예외를 전파합니다. False 이면 경고 후
+				기본 설정으로 동작하되 원본 설정 파일은 덮어쓰지 않습니다 (기본값: False)
 		"""
 		self.config_file = Path(config_file)
+		self.strict = strict
 		self.config: Dict[str, Any] = {}
 		self.logger = logging.getLogger(__name__)
 		self.reload()
@@ -110,7 +113,15 @@ class ConfigManager:
 			self.config = loaded_config
 			return
 
-		backup_file = self._backup_config_file()
+		try:
+			backup_file = self._backup_config_file()
+		except OSError as e:
+			if (self.strict):
+				raise
+			self.logger.error(f"Settings backup failed ({e}), use defaults without saving: {self.config_file}")
+			self.config = self._get_default_config()
+			return
+
 		self.logger.warning(f"Invalid settings format, backup to {backup_file}, use defaults: {self.config_file}")
 		self.config = self._get_default_config()
 		self._save_config()
