@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import argparse
+from datetime import datetime
 
 
 import pytest
@@ -497,6 +498,23 @@ class TestErrorHandling:
 		assert len(backup_files) == 2
 		for backup_file in backup_files:
 			assert backup_file.read_text(encoding='utf-8') == "[]"
+
+	def test_backup_name_collision_uses_sequence(self, config_manager: ConfigManager, monkeypatch):
+		"""같은 시각에 백업해도 일련번호를 붙여 기존 백업을 덮어쓰지 않아야 함."""
+		class FixedDatetime:
+			@classmethod
+			def now(cls):
+				return datetime(2026, 10, 21, 10, 0, 0)
+
+		monkeypatch.setattr("src.config.datetime", FixedDatetime)
+
+		for _ in range(2):
+			config_manager.config_file.write_text("[]")
+			config_manager.reload()
+
+		prefix = config_manager.config_file.name + ".20261021-100000"
+		names = sorted(path.name for path in config_manager.config_file.parent.glob(prefix + "*.bak"))
+		assert names == [prefix + "-1.bak", prefix + ".bak"]
 
 	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
 		"""백업 생성이 실패하면 기본 설정으로 동작하되 원본 설정 파일은 덮어쓰지 않아야 함."""
