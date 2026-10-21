@@ -18,7 +18,7 @@ import traceback
 import argparse
 
 from src.models import (
-	ConfigDef, ConfigKey, FileInfo, FileStatus,
+	ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection,
 	ProgressInfo, ResolutionMode, VideoCodec, VideoInfo
 )
 from src.config import ConfigManager
@@ -369,6 +369,36 @@ class VideoEncoder:
 			return {"removed": removed, "added": added}
 		finally:
 			self.refreshing = False
+
+
+	def move_file(self, filename: str, direction: MoveDirection) -> bool:
+		"""
+		대기 중인 파일의 목록 내 위치를 이동합니다. (인코딩 순서도 함께 바뀜)
+
+		Args:
+			filename (str): 이동할 파일명
+			direction (MoveDirection): 이동 방향 (처음으로 / 한칸위 / 한칸아래 / 마지막으로)
+
+		Returns:
+			bool: 이동했으면 True, 파일이 없거나 대기 상태가 아니면 False
+		"""
+		file_info = next((f for f in self.files if (f.filename == filename)), None)
+		if ((file_info is None) or (file_info.status != FileStatus.PENDING)):
+			return False
+
+		current = self._get_current_file()
+		index = self.files.index(file_info)
+		targets = {
+			MoveDirection.FIRST: 0,
+			MoveDirection.UP: index - 1,
+			MoveDirection.DOWN: index + 1,
+			MoveDirection.LAST: len(self.files) - 1
+		}
+		target = min(max(targets[direction], 0), len(self.files) - 1)
+
+		self.files.insert(target, self.files.pop(index))
+		self._sync_current_index(current)
+		return True
 
 
 	def set_resolution_mode(self, filename: str, resolution_mode: str) -> bool:

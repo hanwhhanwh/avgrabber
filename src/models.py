@@ -70,6 +70,16 @@ class VideoCodec(Enum):
     X265 = "libx265"
 
 
+class MoveDirection(Enum):
+    """
+    대기 중 파일의 목록 내 위치 이동 방향을 나타내는 열거형.
+    """
+    FIRST = "first"
+    UP = "up"
+    DOWN = "down"
+    LAST = "last"
+
+
 class ResolutionMode(Enum):
     """해상도 모드를 나타내는 열거형."""
     SD = "SD"

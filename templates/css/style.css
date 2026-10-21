@@ -206,6 +206,32 @@ body {
 	margin-bottom: 10px;
 }
 
+.move-buttons {
+	display: none;
+	gap: 5px;
+	margin-left: auto;
+	margin-right: 10px;
+}
+
+.file-item.pending:hover .move-buttons {
+	display: flex;
+}
+
+.move-buttons button {
+	padding: 4px 10px;
+	border: 1px solid #667eea;
+	border-radius: 4px;
+	background: white;
+	color: #667eea;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.move-buttons button:hover {
+	background: #667eea;
+	color: white;
+}
+
 .filename {
 	font-weight: bold;
 	font-size: 16px;

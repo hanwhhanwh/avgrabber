@@ -278,6 +278,14 @@ function updateFileList(data) {
 						${file.output_filename && file.output_filename !== file.filename ? 
 							`<span class="output-filename">→ ${file.output_filename}</span>` : ''}
 					</div>
+					${file.status === 'pending' ? `
+					<div class="move-buttons">
+						<button onclick="moveFile('${file.filename}', 'first')">⏫ 처음으로</button>
+						<button onclick="moveFile('${file.filename}', 'up')">🔼 한칸위</button>
+						<button onclick="moveFile('${file.filename}', 'down')">🔽 한칸아래</button>
+						<button onclick="moveFile('${file.filename}', 'last')">⏬ 마지막으로</button>
+					</div>
+					` : ''}
 					<span class="status-badge ${statusClass}">${file.status}</span>
 				</div>
 				${videoInfoHtml}
@@ -386,6 +394,30 @@ async function refreshFiles() {
 		alert('새로고침 중 오류 발생: ' + error.message);
 	} finally {
 		refreshBtn.disabled = false;
+	}
+}
+
+
+async function moveFile(filename, direction) {
+	try {
+		const response = await fetch('/move-file', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				filename: filename,
+				direction: direction
+			})
+		});
+
+		const result = await response.json();
+
+		if (!result.success) {
+			alert(result.message || '순서 변경 실패');
+		}
+	} catch (error) {
+		alert('순서 변경 중 오류 발생: ' + error.message);
 	}
 }
 

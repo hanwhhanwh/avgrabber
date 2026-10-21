@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from src.encoder import VideoEncoder
+from src.models import MoveDirection
 from src.ws_manager import WebSocketManager
 
 
@@ -138,6 +139,32 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
 
         await websocket_manager.broadcast_all_status(encoder.get_all_status())
         return {"success": True, "message": f"삭제 {result['removed']}개, 추가 {result['added']}개", **result}
+
+
+    @app.post("/move-file")
+    async def move_file(data: Dict[str, str]) -> Dict[str, Any]:
+        """
+        대기 중인 파일의 목록 내 위치(인코딩 순서)를 이동합니다.
+
+        Args:
+            data (Dict[str, str]): {"filename": "파일명", "direction": "first|up|down|last"} 형식의 요청 데이터
+
+        Returns:
+            Dict[str, Any]: 성공 여부와 메시지를 포함한 딕셔너리
+        """
+        if (encoder is None):
+            return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+        try:
+            direction = MoveDirection(data.get("direction"))
+        except ValueError:
+            return {"success": False, "message": "이동 방향이 올바르지 않습니다"}
+
+        if (encoder.move_file(data.get("filename"), direction)):
+            await websocket_manager.broadcast_all_status(encoder.get_all_status())
+            return {"success": True, "message": "파일 순서를 변경했습니다"}
+        else:
+            return {"success": False, "message": "대기 중인 파일을 찾을 수 없습니다"}
 
 
     @app.post("/set-resolution")
