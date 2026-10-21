@@ -449,29 +449,30 @@ class TestIntegration:
 class TestErrorHandling:
 	"""Test error handling scenarios."""
 	
-	def test_corrupt_json_file(self, config_manager: ConfigManager, monkeypatch):
-		"""Test handling corrupt JSON file."""
-		mock_args = MockArgs(crf=50)
-		config_manager.update_from_args(mock_args)
+	def test_corrupt_json_file(self, config_manager: ConfigManager):
+		"""JSON 문법이 깨진 설정 파일도 백업 후 기본 설정으로 대체되어야 함."""
 		
-		try:
-			config_manager.config_file.write_text("not valid json {{{")
-			# This should fail gracefully
-			with pytest.raises(json.JSONDecodeError):
-				config_manager.reload()
-		except Exception as e:
-			assert "Invalid" in str(type(e).__name__)
+		config_manager.config_file.write_text("not valid json {{{")
+
+		config_manager.reload()
+
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert len(backup_files) == 1
+		assert backup_files[0].read_text(encoding='utf-8') == "not valid json {{{"
+		assert isinstance(config_manager.config, dict)
+		assert config_manager.config[ConfigKey.CRF] == ConfigDef.DEFAULT_CRF
 	
-	def test_empty_config_file(self, config_manager: ConfigManager, monkeypatch):
-		"""Test handling empty config file."""
-		config_manager.config_file.write_text("[]")
+	def test_empty_config_file(self, config_manager: ConfigManager):
+		"""빈 설정 파일도 백업 후 기본 설정으로 대체되어야 함."""
+		config_manager.config_file.write_text("")
 		
-		try:
-			config_manager.reload()
-			# Should work with empty dict
-			assert isinstance(config_manager.config, dict)
-		except Exception as e:
-			assert "Invalid" in str(type(e).__name__)
+		config_manager.reload()
+
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert len(backup_files) == 1
+		assert backup_files[0].read_text(encoding='utf-8') == ""
+		assert isinstance(config_manager.config, dict)
+		assert config_manager.config[ConfigKey.CRF] == ConfigDef.DEFAULT_CRF
 
 	def test_invalid_config_backed_up(self, config_manager: ConfigManager):
 		"""객체가 아닌 설정 파일은 타임스탬프 백업으로 보관되고 기본 설정으로 대체되어야 함."""
@@ -496,6 +497,20 @@ class TestErrorHandling:
 		assert len(backup_files) == 2
 		for backup_file in backup_files:
 			assert backup_file.read_text(encoding='utf-8') == "[]"
+
+	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
+		"""백업 생성이 실패하면 원본 설정 파일을 덮어쓰지 않아야 함."""
+		config_manager.config_file.write_text("[]")
+
+		def raise_backup_error(*args, **kwargs):
+			raise OSError("backup failed")
+
+		monkeypatch.setattr("src.config.shutil.copy2", raise_backup_error)
+
+		with pytest.raises(OSError):
+			config_manager.reload()
+
+		assert config_manager.config_file.read_text(encoding='utf-8') == "[]"
 
 
 # ==================== ====================
