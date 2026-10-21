@@ -33,7 +33,9 @@ class ConfigDef:
     DEFAULT_SUBTITLE_DIR: Final[str] = "/home/secc/tmp/subs"
     DEFAULT_LOG_DIR: Final[str] = "logs"
     DEFAULT_VIDEO_CODEC: Final[str] = "libsvtav1"
-    DEFAULT_CRF: Final[int] = 27
+    DEFAULT_CRF: Final[Optional[int]] = None    # None 이면 코덱별 권장 CRF 사용
+    DEFAULT_CRF_SVT_AV1: Final[int] = 30
+    DEFAULT_CRF_X265: Final[int] = 27
     DEFAULT_VOLUME: Final[float] = 1.15
     DEFAULT_AUDIO_BITRATE: Final[str] = "128k"
     MAX_CONFIG_BACKUPS: Final[int] = 5

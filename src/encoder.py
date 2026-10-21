@@ -356,6 +356,25 @@ class VideoEncoder:
 			return VideoCodec(ConfigDef.DEFAULT_VIDEO_CODEC)
 
 
+	def get_crf(self, video_codec: VideoCodec) -> int:
+		"""
+		인코딩에 사용할 CRF 값을 반환합니다.
+		설정(또는 --crf 인자)에 값이 있으면 그 값을, 없으면(null) 코덱별 권장값을 사용합니다.
+
+		Args:
+			video_codec (VideoCodec): 인코딩에 사용할 영상 코덱
+
+		Returns:
+			int: CRF 값
+		"""
+		crf = self.config.get(ConfigKey.CRF)
+		if (crf is not None):
+			return crf
+		if (video_codec == VideoCodec.X265):
+			return ConfigDef.DEFAULT_CRF_X265
+		return ConfigDef.DEFAULT_CRF_SVT_AV1
+
+
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
 		"""FileInfo를 기반으로 FFmpeg 인코딩 명령어 리스트를 생성합니다.
 
@@ -385,7 +404,7 @@ class VideoEncoder:
 		cmd.extend([
 			"-f", "mp4",
 			"-c:v", video_codec.value,
-			"-crf:v", str(self.config.get(ConfigKey.CRF))
+			"-crf:v", str(self.get_crf(video_codec))
 		])
 
 		# 코덱별 전용 옵션 (libsvtav1 은 -tune 옵션이 없어 svtav1-params 로 전달)
@@ -710,8 +729,9 @@ class VideoEncoder:
 		print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
 		print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
 		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
-		print(f"영상 코덱: {self.get_video_codec().value}")
-		print(f"CRF: {config.get(ConfigKey.CRF)}")
+		video_codec = self.get_video_codec()
+		print(f"영상 코덱: {video_codec.value}")
+		print(f"CRF: {self.get_crf(video_codec)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
 		print(f"default resolution: {self.resolution_mode.value}")
