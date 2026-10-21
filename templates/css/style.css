@@ -23,17 +23,30 @@ body {
 .header {
 	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 	color: white;
-	padding: 30px;
-	text-align: center;
+	padding: 12px 30px;
+	display: flex;
+	align-items: center;
+	gap: 15px;
 }
 
 .header h1 {
-	font-size: 32px;
-	margin-bottom: 10px;
+	font-size: 22px;
 }
 
 .header p {
 	opacity: 0.9;
+	font-size: 14px;
+}
+
+/* 연결 상태는 헤더 오른쪽 끝에 배지로 표시 */
+.header .connection-status {
+	margin-left: auto;
+	padding: 0;
+}
+
+.header .connection-status span {
+	padding: 4px 12px;
+	border-radius: 12px;
 }
 
 .encode-settings {
