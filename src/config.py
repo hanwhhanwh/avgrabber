@@ -4,14 +4,18 @@
 # date : 2026-06-02
 
 import json
+import re
 import argparse
 import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Final, List, Optional
 
 from src.models import ConfigKey, ConfigDef, ResolutionMode
+
+
+CONFIG_BACKUP_PATTERN: Final[re.Pattern] = re.compile(r"\.(\d{8}-\d{6})(?:-(\d+))?\.bak$")
 
 
 
@@ -95,10 +99,7 @@ class ConfigManager:
 			Path: 백업 파일 경로
 		"""
 		timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-		existing_backups = sorted(
-			self.config_file.parent.glob(f"{self.config_file.name}.{timestamp}*.bak")
-			, key=self._backup_order_key
-		)
+		existing_backups = self._find_backup_files(f"{self.config_file.name}.{timestamp}*.bak")
 		sequence = (self._backup_order_key(existing_backups[-1])[1] + 1) if (existing_backups) else 0
 		suffix = f"-{sequence}" if (0 < sequence) else ""
 		backup_file = self.config_file.parent / f"{self.config_file.name}.{timestamp}{suffix}.bak"
@@ -109,32 +110,52 @@ class ConfigManager:
 		return backup_file
 
 
-	def _backup_order_key(self, backup_file: Path) -> tuple:
+	def _find_backup_files(self, pattern: str) -> List[Path]:
+		"""glob 패턴에 맞는 파일 중 백업명 규칙을 만족하는 것만 오래된 순으로 반환합니다.
+
+		Args:
+			pattern (str): 검색할 glob 패턴
+
+		Returns:
+			List[Path]: 백업명 규칙을 만족하는 백업 파일 목록 (오래된 것부터)
+		"""
+		backup_files = []
+		for backup_file in self.config_file.parent.glob(pattern):
+			order_key = self._backup_order_key(backup_file)
+			if (order_key is not None):
+				backup_files.append((order_key, backup_file))
+		backup_files.sort(key=lambda item: item[0])
+
+		return [backup_file for _, backup_file in backup_files]
+
+
+	def _backup_order_key(self, backup_file: Path) -> Optional[tuple]:
 		"""백업 파일명에서 (타임스탬프, 일련번호) 정렬 키를 만듭니다.
 
 		Args:
 			backup_file (Path): 백업 파일 경로
 
 		Returns:
-			tuple: (타임스탬프 문자열, 일련번호 정수) 튜플
+			Optional[tuple]: 백업명 규칙을 만족하면 (타임스탬프, 일련번호), 아니면 None
 		"""
-		stem = backup_file.name[len(self.config_file.name) + 1:-len(".bak")]
-		timestamp = stem[:15]
-		sequence = stem[15:]
+		matched = CONFIG_BACKUP_PATTERN.search(backup_file.name)
+		if (matched is None):
+			return None
 
-		return (timestamp, int(sequence[1:]) if (sequence) else 0)
+		timestamp = matched.group(1)
+		sequence = matched.group(2)
+
+		return (timestamp, int(sequence) if (sequence) else 0)
 
 
 	def _prune_backups(self, protect: Optional[Path] = None) -> None:
 		"""최근 ConfigDef.MAX_CONFIG_BACKUPS 개만 남기고 오래된 설정 백업을 삭제합니다.
+		백업명 규칙을 벗어난 파일은 정리 대상에서 제외합니다.
 
 		Args:
 			protect (Optional[Path]): 삭제 대상에서 제외할 백업 파일 (방금 생성한 백업)
 		"""
-		backup_files = sorted(
-			self.config_file.parent.glob(f"{self.config_file.name}.*.bak")
-			, key=self._backup_order_key
-		)
+		backup_files = self._find_backup_files(f"{self.config_file.name}.*.bak")
 		for backup_file in backup_files[:-ConfigDef.MAX_CONFIG_BACKUPS]:
 			if ((protect is not None) and (backup_file == protect)):
 				continue
