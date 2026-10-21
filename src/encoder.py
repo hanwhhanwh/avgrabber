@@ -640,9 +640,15 @@ class VideoEncoder:
 			file_info.progress.size = size_match.group(1)
 		if (time_match):
 			file_info.progress.time = time_match.group(1)
-			if (file_info.video_info.duration_seconds > 0):
-				current_seconds = self.parse_time_to_seconds(time_match.group(1))
-				file_info.progress.progress_percent = (current_seconds / file_info.video_info.duration_seconds) * 100
+
+		# 진행률은 프레임 수 기준 (SVT-AV1 은 time 값이 실제 진행보다 앞서 나가는 경우가 있음)
+		# 프레임 정보를 쓸 수 없을 때만 time 기준으로 계산
+		total_frames = file_info.video_info.duration_seconds * file_info.video_info.fps
+		if ((frame_match) and (0 < total_frames)):
+			file_info.progress.progress_percent = min(file_info.progress.frame / total_frames * 100, 100.0)
+		elif ((time_match) and (file_info.video_info.duration_seconds > 0)):
+			current_seconds = self.parse_time_to_seconds(time_match.group(1))
+			file_info.progress.progress_percent = (current_seconds / file_info.video_info.duration_seconds) * 100
 		if (bitrate_match):
 			file_info.progress.bitrate = bitrate_match.group(1)
 		if (speed_match):
