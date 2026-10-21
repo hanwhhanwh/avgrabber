@@ -70,11 +70,19 @@ class ConfigManager:
 
 
 	def reload(self) -> None:
-		"""설정 파일이 존재하면 로드하고, 없으면 기본 설정으로 새 파일을 생성합니다."""
-		if self.config_file.exists():
+		"""설정 파일이 존재하면 로드하고, 없으면 기본 설정으로 새 파일을 생성합니다.
+		로드한 내용이 객체(dict)가 아니면 기본 설정으로 대체합니다.
+		"""
+		if (self.config_file.exists()):
 			self.logger.info(f"Settings loaded: {self.config_file}")
 			with open(self.config_file, 'r', encoding='utf-8') as f:
-				self.config = json.load(f)
+				loaded_config = json.load(f)
+			if (isinstance(loaded_config, dict)):
+				self.config = loaded_config
+			else:
+				self.logger.warning(f"Invalid settings format, use defaults: {self.config_file}")
+				self.config = self._get_default_config()
+				self._save_config()
 		else:
 			self.config = self._get_default_config()
 			self._save_config()
