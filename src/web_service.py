@@ -124,6 +124,22 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
             return {"success": False, "message": "진행 중인 인코딩이 없습니다"}
 
 
+    @app.post("/refresh")
+    async def refresh_files() -> Dict[str, Any]:
+        """
+        입력 디렉토리를 다시 읽어 삭제된 파일은 제거하고 신규 파일은 목록 끝에 추가합니다.
+        """
+        if (encoder is None):
+            return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+        result = await encoder.refresh_files(websocket_manager)
+        if (result is None):
+            return {"success": False, "message": "이미 새로고침 중입니다"}
+
+        await websocket_manager.broadcast_all_status(encoder.get_all_status())
+        return {"success": True, "message": f"삭제 {result['removed']}개, 추가 {result['added']}개", **result}
+
+
     @app.post("/set-resolution")
     async def set_resolution(data: Dict[str, str]) -> Dict[str, Any]:
         """특정 파일의 해상도 모드를 변경합니다.

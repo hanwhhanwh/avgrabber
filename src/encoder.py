@@ -46,6 +46,7 @@ class VideoEncoder:
 		self.stop_current: bool = False
 		self.stop_all: bool = False
 		self.resolution_mode: ResolutionMode = ResolutionMode.HD
+		self.refreshing: bool = False
 		self._ensure_directories()
 
 
@@ -280,26 +281,94 @@ class VideoEncoder:
 		return sorted(self.input_dir.glob("*.mp4"))
 
 
-	async def prepare_files(self) -> None:
-		"""비디오 파일 목록을 읽고 각 파일의 메타데이터를 수집하여 FileInfo 목록을 구성합니다."""
-		video_files = await self.get_video_files()
-		self.files = []
+	async def create_file_info(self, video_file: Path) -> FileInfo:
+		"""
+		비디오 파일의 메타데이터를 수집하여 FileInfo 를 생성합니다.
 
-		for video_file in video_files:
-			file_info = FileInfo(str(video_file.name))
-			subtitle_file = self.find_subtitle(video_file)
-			file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
-			file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
-			file_info.resolution_mode = self.resolution_mode
-			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
-			file_info.output_filename = self.generate_output_filename(
-				video_file,
-				file_info.video_info,
-				file_info.subtitle_file,
-				file_info.resolution_mode,
-				use_uncensored=self.check_uncensored_pattern(video_file.name)
-			)
-			self.files.append(file_info)
+		Args:
+			video_file (Path): 비디오 파일 경로
+
+		Returns:
+			FileInfo: 메타데이터·자막·출력 파일명이 채워진 파일 정보
+		"""
+		file_info = FileInfo(str(video_file.name))
+		subtitle_file = self.find_subtitle(video_file)
+		file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
+		file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
+		file_info.resolution_mode = self.resolution_mode
+		file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
+		file_info.output_filename = self.generate_output_filename(
+			video_file,
+			file_info.video_info,
+			file_info.subtitle_file,
+			file_info.resolution_mode,
+			use_uncensored=self.check_uncensored_pattern(video_file.name)
+		)
+		return file_info
+
+
+	def _get_current_file(self) -> Optional[FileInfo]:
+		"""
+		현재 인코딩 중인 파일 정보를 반환합니다.
+
+		Returns:
+			Optional[FileInfo]: 인코딩 중인 파일 정보, 없으면 None
+		"""
+		if (0 <= self.current_file_index < len(self.files)):
+			return self.files[self.current_file_index]
+		return None
+
+
+	def _sync_current_index(self, current: Optional[FileInfo]) -> None:
+		"""
+		목록 변경(삭제·이동) 후 인코딩 중인 파일의 새 위치로 current_file_index 를 맞춥니다.
+
+		Args:
+			current (Optional[FileInfo]): 목록 변경 전에 인코딩 중이던 파일 정보
+		"""
+		if (current is not None):
+			self.current_file_index = self.files.index(current)
+
+
+	async def refresh_files(self, websocket_manager: WebSocketManager) -> Optional[Dict[str, int]]:
+		"""
+		입력 디렉토리를 다시 읽어 파일 목록을 갱신합니다.
+		삭제된 파일은 목록에서 제거하고(인코딩 중인 파일 제외), 신규 파일은 목록 끝에
+		하나씩 추가하며 추가할 때마다 전체 상태를 브로드캐스트합니다.
+
+		Args:
+			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
+
+		Returns:
+			Optional[Dict[str, int]]: {"removed": 제거 수, "added": 추가 수}, 이미 새로고침 중이면 None
+		"""
+		if (self.refreshing):
+			return None
+
+		self.refreshing = True
+		try:
+			video_files = await self.get_video_files()
+			video_names = {video_file.name for video_file in video_files}
+
+			current = self._get_current_file()
+			count_before = len(self.files)
+			self.files = [f for f in self.files if ((f.filename in video_names) or (f is current))]
+			removed = count_before - len(self.files)
+			self._sync_current_index(current)
+			if (0 < removed):
+				await websocket_manager.broadcast_all_status(self.get_all_status())
+
+			added = 0
+			for video_file in video_files:
+				if (any(f.filename == video_file.name for f in self.files)):
+					continue
+				self.files.append(await self.create_file_info(video_file))
+				added += 1
+				await websocket_manager.broadcast_all_status(self.get_all_status())
+
+			return {"removed": removed, "added": added}
+		finally:
+			self.refreshing = False
 
 
 	def set_resolution_mode(self, filename: str, resolution_mode: str) -> bool:
@@ -711,7 +780,9 @@ class VideoEncoder:
 
 	async def encode_all(self, websocket_manager: WebSocketManager) -> None:
 		"""모든 대기 중인 파일을 순차적으로 인코딩합니다.
-		설정을 다시 로드하고 파일 목록을 준비한 후 WebSocket으로 상태를 전송합니다.
+		설정을 다시 로드하고 파일 목록을 새로고침한 후 WebSocket으로 상태를 전송합니다.
+		중단·실패한 파일은 다시 대기 상태로 돌리고, 완료된 파일은 건너뜁니다.
+		인코딩 중 새로고침·순서 변경이 반영되도록 매번 목록의 첫 번째 대기 파일을 선택합니다.
 
 		Args:
 			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
@@ -725,17 +796,19 @@ class VideoEncoder:
 		except Exception as e:
 			print(f"config error: {e}")
 
-		await self.prepare_files()
+		await self.refresh_files(websocket_manager)
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.STOPPED, FileStatus.FAILED)):
+				file_info.status = FileStatus.PENDING
+				file_info.progress = ProgressInfo()
 		await websocket_manager.broadcast_all_status(self.get_all_status())
 
-		for idx, file_info in enumerate(self.files):
-			if (self.stop_all):
+		while (not self.stop_all):
+			file_info = next((f for f in self.files if (f.status == FileStatus.PENDING)), None)
+			if (file_info is None):
 				break
 
-			if (file_info.status == FileStatus.COMPLETED):
-				continue
-
-			self.current_file_index = idx
+			self.current_file_index = self.files.index(file_info)
 			await self.encode_file(file_info, websocket_manager)
 
 		self.current_file_index = -1

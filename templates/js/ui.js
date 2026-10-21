@@ -371,6 +371,25 @@ async function stopAll() {
 }
 
 
+async function refreshFiles() {
+	const refreshBtn = document.getElementById('refreshBtn');
+	refreshBtn.disabled = true;
+
+	try {
+		const response = await fetch('/refresh', { method: 'POST' });
+		const result = await response.json();
+
+		if (!result.success) {
+			alert(result.message || '새로고침 실패');
+		}
+	} catch (error) {
+		alert('새로고침 중 오류 발생: ' + error.message);
+	} finally {
+		refreshBtn.disabled = false;
+	}
+}
+
+
 async function changeResolution(filename, resolution) {
 	try {
 		const response = await fetch('/set-resolution', {
