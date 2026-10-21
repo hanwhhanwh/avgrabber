@@ -16,6 +16,7 @@ function connect() {
 		
 		if (data.type === 'full') {
 			filesData = data.files;
+			updateEncodeSettings(data.encode_settings);
 			updateFileList(data);
 			updateOverallProgress(data);
 		} else if (data.type === 'current') {
@@ -42,6 +43,16 @@ function updateConnectionStatus(connected) {
 	} else {
 		status.innerHTML = '<span class="disconnected">✗ 연결 끊김</span>';
 	}
+}
+
+
+function updateEncodeSettings(settings) {
+	if (!settings) return;
+	document.getElementById('encodeSettings').innerHTML = `
+		<span><span class="info-label">코덱:</span> ${settings.codec}</span>
+		<span><span class="info-label">Preset:</span> ${settings.preset}</span>
+		<span><span class="info-label">CRF:</span> ${settings.crf}</span>
+	`;
 }
 
 

@@ -391,6 +391,36 @@ class VideoEncoder:
 		return pix_fmts[bit_depth]
 
 
+	def get_preset(self, video_codec: VideoCodec) -> str:
+		"""
+		코덱별 인코딩 preset 값을 반환합니다. (x265: slow 고정, SVT-AV1: 설정 값)
+
+		Args:
+			video_codec (VideoCodec): 인코딩에 사용할 영상 코덱
+
+		Returns:
+			str: preset 값
+		"""
+		if (video_codec == VideoCodec.X265):
+			return "slow"
+		return str(self.config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET))
+
+
+	def get_encode_settings(self) -> Dict[str, Any]:
+		"""
+		웹 UI 표시용 인코딩 설정(코덱, preset, CRF)을 반환합니다.
+
+		Returns:
+			Dict[str, Any]: {"codec": 코덱명, "preset": preset, "crf": CRF} 딕셔너리
+		"""
+		video_codec = self.get_video_codec()
+		return {
+			"codec": video_codec.value,
+			"preset": self.get_preset(video_codec),
+			"crf": self.get_crf(video_codec)
+		}
+
+
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
 		"""FileInfo를 기반으로 FFmpeg 인코딩 명령어 리스트를 생성합니다.
 
@@ -425,10 +455,10 @@ class VideoEncoder:
 
 		# 코덱별 전용 옵션 (libsvtav1 은 -tune 옵션이 없어 svtav1-params 로 전달)
 		if (video_codec == VideoCodec.X265):
-			cmd.extend(["-preset:v", "slow", "-tune:v", "ssim"])
+			cmd.extend(["-preset:v", self.get_preset(video_codec), "-tune:v", "ssim"])
 		else:
 			cmd.extend([
-				"-preset:v", str(self.config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET)),
+				"-preset:v", self.get_preset(video_codec),
 				"-pix_fmt", self.get_svtav1_pix_fmt(),
 				"-svtav1-params", "tune=0"
 			])
@@ -637,6 +667,7 @@ class VideoEncoder:
 		all_status = {
 			"type": "full",
 			"files": [f.to_dict() for f in self.files],
+			"encode_settings": self.get_encode_settings(),
 			"current_index": self.current_file_index,
 			"overall_progress": round(overall_progress, 1),
 			"completed_count": completed,

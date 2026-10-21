@@ -36,6 +36,20 @@ body {
 	opacity: 0.9;
 }
 
+.encode-settings {
+	padding: 10px 30px;
+	background: #f8f9fa;
+	border-bottom: 1px solid #dee2e6;
+	display: flex;
+	gap: 30px;
+	font-size: 14px;
+	color: #333;
+}
+
+.encode-settings:empty {
+	display: none;
+}
+
 .overall-progress {
 	padding: 20px 30px;
 	background: #f8f9fa;
