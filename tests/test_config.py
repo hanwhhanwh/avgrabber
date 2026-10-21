@@ -474,16 +474,28 @@ class TestErrorHandling:
 			assert "Invalid" in str(type(e).__name__)
 
 	def test_invalid_config_backed_up(self, config_manager: ConfigManager):
-		"""객체가 아닌 설정 파일은 .bak 으로 보관되고 기본 설정으로 대체되어야 함."""
+		"""객체가 아닌 설정 파일은 타임스탬프 백업으로 보관되고 기본 설정으로 대체되어야 함."""
 		config_manager.config_file.write_text("[]")
 
 		config_manager.reload()
 
-		backup_file = config_manager.config_file.with_name(config_manager.config_file.name + ".bak")
-		assert backup_file.exists()
-		assert backup_file.read_text(encoding='utf-8') == "[]"
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert len(backup_files) == 1
+		assert backup_files[0].read_text(encoding='utf-8') == "[]"
 		assert isinstance(config_manager.config, dict)
 		assert config_manager.config[ConfigKey.FFMPEG_PATH] == ConfigDef.DEFAULT_FFMPEG
+
+	def test_backup_keeps_previous_backups(self, config_manager: ConfigManager):
+		"""손상이 반복되어도 이전 백업 파일을 덮어쓰지 않아야 함."""
+		config_manager.config_file.write_text("[]")
+		config_manager.reload()
+		config_manager.config_file.write_text("[]")
+		config_manager.reload()
+
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert len(backup_files) == 2
+		for backup_file in backup_files:
+			assert backup_file.read_text(encoding='utf-8') == "[]"
 
 
 # ==================== ====================
