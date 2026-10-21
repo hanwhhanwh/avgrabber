@@ -3,7 +3,9 @@
 
 from pathlib import Path
 from typing import Any, Dict, List
+from unittest.mock import AsyncMock
 
+import asyncio
 import sys
 
 import pytest
@@ -15,7 +17,7 @@ if (_project_root not in sys.path):
 	sys.path.insert(0, _project_root)
 
 from src.encoder import VideoEncoder
-from src.models import ConfigDef, ConfigKey, FileInfo, VideoCodec
+from src.models import ConfigDef, ConfigKey, FileInfo, FileStatus, VideoCodec
 
 
 class StubConfig:
@@ -164,6 +166,107 @@ def test_encode_settings(tmp_path: Path, codec: str, expected: Dict[str, Any]):
 	"""웹 UI 표시용 인코딩 설정은 실제 명령과 같은 코덱·preset·CRF 를 반환한다."""
 	encoder = make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: codec, ConfigKey.CRF: None})
 	assert encoder.get_encode_settings() == expected
+
+
+def make_list_encoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: List[str]) -> VideoEncoder:
+	"""
+	입력 디렉토리에 names 파일이 있는 인코더를 만듭니다. (ffprobe 대신 빈 FileInfo 생성)
+
+	Args:
+		tmp_path (Path): 입력 디렉토리로 쓸 임시 경로
+		monkeypatch (pytest.MonkeyPatch): create_file_info 대체용
+		names (List[str]): 입력 디렉토리에 만들 파일명
+
+	Returns:
+		VideoEncoder: 테스트용 인코더
+	"""
+	for name in names:
+		(tmp_path / name).write_bytes(b"")
+
+	encoder = make_encoder(tmp_path)
+	encoder.files = []
+	encoder.current_file_index = -1
+	encoder.refreshing = False
+	encoder.stop_all = False
+
+	async def fake_create_file_info(video_file: Path) -> FileInfo:
+		return FileInfo(video_file.name)
+
+	monkeypatch.setattr(encoder, "create_file_info", fake_create_file_info)
+	return encoder
+
+
+def filenames(encoder: VideoEncoder) -> List[str]:
+	"""
+	인코더 파일 목록의 파일명 리스트를 반환합니다.
+
+	Args:
+		encoder (VideoEncoder): 테스트용 인코더
+
+	Returns:
+		List[str]: 목록 순서대로의 파일명
+	"""
+	return [f.filename for f in encoder.files]
+
+
+def test_refresh_removes_deleted_and_appends_new(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""새로고침 시 삭제된 파일은 제거하고, 신규 파일은 기존 순서 뒤에 하나씩 추가한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["b.mp4", "c.mp4"])
+	encoder.files = [FileInfo("c.mp4"), FileInfo("a.mp4"), FileInfo("b.mp4")]	# a.mp4 는 삭제된 상태
+	(tmp_path / "d.mp4").write_bytes(b"")
+	(tmp_path / "e.mp4").write_bytes(b"")
+	ws = AsyncMock()
+
+	result = asyncio.run(encoder.refresh_files(ws))
+
+	assert result == {"removed": 1, "added": 2}
+	assert filenames(encoder) == ["c.mp4", "b.mp4", "d.mp4", "e.mp4"]
+	assert ws.broadcast_all_status.await_count == 3	# 제거 1회 + 추가 파일마다 1회
+
+
+def test_refresh_keeps_encoding_file_and_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""인코딩 중인 파일은 삭제되어도 유지하고, current_file_index 를 새 위치로 맞춘다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["b.mp4"])
+	encoder.files = [FileInfo("a.mp4"), FileInfo("x.mp4"), FileInfo("b.mp4")]
+	encoder.current_file_index = 1	# x.mp4 인코딩 중 (디렉토리에서 삭제됨)
+
+	asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert filenames(encoder) == ["x.mp4", "b.mp4"]
+	assert encoder.current_file_index == 0
+
+
+def test_refresh_rejected_while_refreshing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""이미 새로고침 중이면 None 을 반환하고 목록을 바꾸지 않는다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["a.mp4"])
+	encoder.refreshing = True
+
+	assert asyncio.run(encoder.refresh_files(AsyncMock())) is None
+	assert encoder.files == []
+
+
+def test_encode_all_follows_list_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""인코딩 중 목록 끝에 추가된 파일도 이어서 인코딩하고, 완료 파일은 건너뛰며 중단 파일은 재시도한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["a.mp4", "b.mp4", "c.mp4"])
+	encoder.config.reload = lambda: None
+	encoder.parse_arguments = lambda: None
+	encoder.print_config = lambda: None
+	encoder.files = [FileInfo("a.mp4", FileStatus.COMPLETED), FileInfo("b.mp4", FileStatus.STOPPED)]
+	encoded: List[str] = []
+
+	async def fake_encode_file(file_info: FileInfo, websocket_manager: Any) -> bool:
+		encoded.append(file_info.filename)
+		assert encoder.files[encoder.current_file_index] is file_info
+		if (file_info.filename == "b.mp4"):
+			encoder.files.append(FileInfo("late.mp4"))	# 인코딩 중 새로고침으로 추가된 파일
+		file_info.status = FileStatus.COMPLETED
+		return True
+
+	monkeypatch.setattr(encoder, "encode_file", fake_encode_file)
+	asyncio.run(encoder.encode_all(AsyncMock()))
+
+	assert encoded == ["b.mp4", "c.mp4", "late.mp4"]
+	assert encoder.current_file_index == -1
 
 
 if __name__ == "__main__":

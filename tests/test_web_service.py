@@ -160,6 +160,28 @@ class TestHTTPEndpoints:
             data = response.json()
             assert data["success"] is False
 
+    def test_refresh_success(self, client, mock_encoder):
+        """새로고침 성공 시 삭제·추가 개수를 반환."""
+        mock_encoder.refresh_files = AsyncMock(return_value={"removed": 1, "added": 2})
+        response = client.post("/refresh")
+        data = response.json()
+        assert data["success"] is True
+        assert data["removed"] == 1
+        assert data["added"] == 2
+
+    def test_refresh_already_running(self, client, mock_encoder):
+        """이미 새로고침 중이면 실패 응답."""
+        mock_encoder.refresh_files = AsyncMock(return_value=None)
+        response = client.post("/refresh")
+        assert response.json()["success"] is False
+
+    def test_refresh_no_encoder(self):
+        """encoder=None인 경우."""
+        app = create_app(None)
+        with TestClient(app) as c:
+            response = c.post("/refresh")
+            assert response.json()["success"] is False
+
     def test_set_resolution_success(self, client, mock_encoder):
         """해상도 설정 성공."""
         response = client.post("/set-resolution", json={
