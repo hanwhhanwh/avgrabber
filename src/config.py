@@ -90,23 +90,30 @@ class ConfigManager:
 
 	def reload(self) -> None:
 		"""설정 파일이 존재하면 로드하고, 없으면 기본 설정으로 새 파일을 생성합니다.
-		로드한 내용이 객체(dict)가 아니면 원본을 .bak 으로 보관한 뒤 기본 설정으로 대체합니다.
+		파일 내용이 JSON 객체(dict)가 아니면 원본을 백업한 뒤 기본 설정으로 대체합니다.
 		"""
-		if (self.config_file.exists()):
-			self.logger.info(f"Settings loaded: {self.config_file}")
-			with open(self.config_file, 'r', encoding='utf-8') as f:
-				loaded_config = json.load(f)
-			if (isinstance(loaded_config, dict)):
-				self.config = loaded_config
-			else:
-				backup_file = self._backup_config_file()
-				self.logger.warning(f"Invalid settings format, backup to {backup_file}, use defaults: {self.config_file}")
-				self.config = self._get_default_config()
-				self._save_config()
-		else:
+		if (not self.config_file.exists()):
 			self.config = self._get_default_config()
 			self._save_config()
 			self.logger.info(f"Default settings file created: {self.config_file}")
+			return
+
+		self.logger.info(f"Settings loaded: {self.config_file}")
+		loaded_config = None
+		try:
+			with open(self.config_file, 'r', encoding='utf-8') as f:
+				loaded_config = json.load(f)
+		except json.JSONDecodeError as e:
+			self.logger.warning(f"Invalid settings JSON ({e}): {self.config_file}")
+
+		if (isinstance(loaded_config, dict)):
+			self.config = loaded_config
+			return
+
+		backup_file = self._backup_config_file()
+		self.logger.warning(f"Invalid settings format, backup to {backup_file}, use defaults: {self.config_file}")
+		self.config = self._get_default_config()
+		self._save_config()
 
 
 	def update_from_args(self, args: argparse.Namespace) -> None:
