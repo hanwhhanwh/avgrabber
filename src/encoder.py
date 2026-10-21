@@ -356,6 +356,8 @@ class VideoEncoder:
 
 		cmd = [
 			self.config.get(ConfigKey.FFMPEG_PATH),
+			"-err_detect", "ignore_err",
+			"-fflags", "+igndts+genpts+discardcorrupt",
 			"-i", str(input_file)
 		]
 
@@ -368,7 +370,10 @@ class VideoEncoder:
 			"-c:v", "libx265",
 			"-crf:v", str(self.config.get(ConfigKey.CRF)),
 			"-preset:v", "slow",
-			"-tune:v", "ssim"
+			"-tune:v", "ssim",
+			"-avoid_negative_ts", "make_zero",
+			"-fps_mode", "cfr",
+			"-movflags", "+faststart"
 		])
 
 		if (file_info.scale_filter is not None):
