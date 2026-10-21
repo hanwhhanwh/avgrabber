@@ -9,7 +9,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from src.models import ConfigKey, ConfigDef, ResolutionMode
 
@@ -28,6 +28,7 @@ class ConfigManager:
 		"""
 		self.config_file = Path(config_file)
 		self.strict = strict
+		self.backup_failed = False
 		self.config: Dict[str, Any] = {}
 		self.logger = logging.getLogger(__name__)
 		self.reload()
@@ -54,7 +55,13 @@ class ConfigManager:
 
 
 	def _save_config(self) -> None:
-		"""현재 설정을 JSON 파일로 저장합니다. 필요 시 상위 디렉토리도 생성합니다."""
+		"""현재 설정을 JSON 파일로 저장합니다. 필요 시 상위 디렉토리도 생성합니다.
+		원본 설정 백업에 실패한 상태라면 원본 보존을 위해 저장을 건너뜁니다.
+		"""
+		if (self.backup_failed):
+			self.logger.warning(f"Skip saving settings, original backup failed: {self.config_file}")
+			return
+
 		self.config_file.parent.mkdir(parents=True, exist_ok=True)
 		with open(self.config_file, 'w', encoding='utf-8') as f:
 			json.dump(self.config, f, indent=2, ensure_ascii=False)
@@ -92,7 +99,7 @@ class ConfigManager:
 		backup_file = self.config_file.parent / f"{self.config_file.name}.{timestamp}{suffix}.bak"
 
 		shutil.copy2(self.config_file, backup_file)
-		self._prune_backups()
+		self._prune_backups(protect=backup_file)
 
 		return backup_file
 
@@ -113,20 +120,30 @@ class ConfigManager:
 		return (timestamp, int(sequence[1:]) if (sequence) else 0)
 
 
-	def _prune_backups(self) -> None:
-		"""최근 ConfigDef.MAX_CONFIG_BACKUPS 개만 남기고 오래된 설정 백업을 삭제합니다."""
+	def _prune_backups(self, protect: Optional[Path] = None) -> None:
+		"""최근 ConfigDef.MAX_CONFIG_BACKUPS 개만 남기고 오래된 설정 백업을 삭제합니다.
+
+		Args:
+			protect (Optional[Path]): 삭제 대상에서 제외할 백업 파일 (방금 생성한 백업)
+		"""
 		backup_files = sorted(
 			self.config_file.parent.glob(f"{self.config_file.name}.*.bak")
 			, key=self._backup_order_key
 		)
 		for backup_file in backup_files[:-ConfigDef.MAX_CONFIG_BACKUPS]:
-			backup_file.unlink(missing_ok=True)
+			if ((protect is not None) and (backup_file == protect)):
+				continue
+			try:
+				backup_file.unlink(missing_ok=True)
+			except OSError as e:
+				self.logger.warning(f"Failed to remove old settings backup {backup_file}: {e}")
 
 
 	def reload(self) -> None:
 		"""설정 파일이 존재하면 로드하고, 없으면 기본 설정으로 새 파일을 생성합니다.
 		파일 내용이 JSON 객체(dict)가 아니면 원본을 백업한 뒤 기본 설정으로 대체합니다.
 		"""
+		self.backup_failed = False
 		if (not self.config_file.exists()):
 			self.config = self._get_default_config()
 			self._save_config()
@@ -150,6 +167,7 @@ class ConfigManager:
 		except OSError as e:
 			if (self.strict):
 				raise
+			self.backup_failed = True
 			self.logger.error(f"Settings backup failed ({e}), use defaults without saving: {self.config_file}")
 			self.config = self._get_default_config()
 			return
