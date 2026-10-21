@@ -6,6 +6,8 @@
   "subtitle_dir": "/path/to/sub_dir",
   "log_dir": "logs",
   "video_codec": "libsvtav1",
+  "svtav1_preset": 4,
+  "svtav1_bit_depth": 10,
   "crf": null,
   "volume": 1.15,
   "audio_bitrate": "128k"

@@ -375,6 +375,22 @@ class VideoEncoder:
 		return ConfigDef.DEFAULT_CRF_SVT_AV1
 
 
+	def get_svtav1_pix_fmt(self) -> str:
+		"""
+		설정의 SVT-AV1 비트 깊이(8 또는 10)에 맞는 픽셀 포맷을 반환합니다.
+		지원하지 않는 값이면 기본 비트 깊이(10)를 사용합니다.
+
+		Returns:
+			str: FFmpeg 픽셀 포맷 (yuv420p 또는 yuv420p10le)
+		"""
+		pix_fmts = {8: "yuv420p", 10: "yuv420p10le"}
+		bit_depth = self.config.get(ConfigKey.SVTAV1_BIT_DEPTH, ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH)
+		if (bit_depth not in pix_fmts):
+			print(f"지원하지 않는 svtav1_bit_depth '{bit_depth}', 기본값 {ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH} 사용")
+			bit_depth = ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH
+		return pix_fmts[bit_depth]
+
+
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
 		"""FileInfo를 기반으로 FFmpeg 인코딩 명령어 리스트를 생성합니다.
 
@@ -411,7 +427,11 @@ class VideoEncoder:
 		if (video_codec == VideoCodec.X265):
 			cmd.extend(["-preset:v", "slow", "-tune:v", "ssim"])
 		else:
-			cmd.extend(["-preset:v", "6", "-pix_fmt", "yuv420p10le", "-svtav1-params", "tune=0"])
+			cmd.extend([
+				"-preset:v", str(self.config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET)),
+				"-pix_fmt", self.get_svtav1_pix_fmt(),
+				"-svtav1-params", "tune=0"
+			])
 
 		cmd.extend([
 			"-avoid_negative_ts", "make_zero",
@@ -731,6 +751,9 @@ class VideoEncoder:
 		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
 		video_codec = self.get_video_codec()
 		print(f"영상 코덱: {video_codec.value}")
+		if (video_codec == VideoCodec.SVT_AV1):
+			print(f"SVT-AV1 preset: {config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET)}")
+			print(f"SVT-AV1 픽셀 포맷: {self.get_svtav1_pix_fmt()}")
 		print(f"CRF: {self.get_crf(video_codec)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")

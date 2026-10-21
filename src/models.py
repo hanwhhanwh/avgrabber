@@ -16,6 +16,8 @@ class ConfigKey:
     SUBTITLE_DIR: Final[str] = "subtitle_dir"
     LOG_DIR: Final[str] = "log_dir"
     VIDEO_CODEC: Final[str] = "video_codec"
+    SVTAV1_PRESET: Final[str] = "svtav1_preset"
+    SVTAV1_BIT_DEPTH: Final[str] = "svtav1_bit_depth"
     CRF: Final[str] = "crf"
     VOLUME: Final[str] = "volume"
     AUDIO_BITRATE: Final[str] = "audio_bitrate"
@@ -33,6 +35,8 @@ class ConfigDef:
     DEFAULT_SUBTITLE_DIR: Final[str] = "/home/secc/tmp/subs"
     DEFAULT_LOG_DIR: Final[str] = "logs"
     DEFAULT_VIDEO_CODEC: Final[str] = "libsvtav1"
+    DEFAULT_SVTAV1_PRESET: Final[int] = 4
+    DEFAULT_SVTAV1_BIT_DEPTH: Final[int] = 10
     DEFAULT_CRF: Final[Optional[int]] = None    # None 이면 코덱별 권장 CRF 사용
     DEFAULT_CRF_SVT_AV1: Final[int] = 30
     DEFAULT_CRF_X265: Final[int] = 27

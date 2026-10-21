@@ -107,7 +107,7 @@ def test_svt_av1_command_options(tmp_path: Path):
 	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: "libsvtav1", ConfigKey.CRF: 30}))
 	assert cmd[cmd.index("-c:v") + 1] == "libsvtav1"
 	assert cmd[cmd.index("-crf:v") + 1] == "30"
-	assert cmd[cmd.index("-preset:v") + 1] == "6"
+	assert cmd[cmd.index("-preset:v") + 1] == "4"
 	assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p10le"
 	assert cmd[cmd.index("-svtav1-params") + 1] == "tune=0"
 	assert "-tune:v" not in cmd
