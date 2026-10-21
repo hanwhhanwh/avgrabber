@@ -11,7 +11,7 @@ import os
 import sys
 import tempfile
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 import pytest
@@ -515,6 +515,28 @@ class TestErrorHandling:
 		prefix = config_manager.config_file.name + ".20261021-100000"
 		names = sorted(path.name for path in config_manager.config_file.parent.glob(prefix + "*.bak"))
 		assert names == [prefix + "-1.bak", prefix + ".bak"]
+
+	def test_backup_pruned_to_max(self, config_manager: ConfigManager, monkeypatch):
+		"""백업은 ConfigDef.MAX_CONFIG_BACKUPS 개까지만 유지되어야 함."""
+		class AdvancingDatetime:
+			current = datetime(2026, 10, 21, 10, 0, 0)
+
+			@classmethod
+			def now(cls):
+				value = cls.current
+				cls.current = value + timedelta(seconds=1)
+				return value
+
+		monkeypatch.setattr("src.config.datetime", AdvancingDatetime)
+
+		for _ in range(ConfigDef.MAX_CONFIG_BACKUPS + 2):
+			config_manager.config_file.write_text("[]")
+			config_manager.reload()
+
+		names = sorted(path.name for path in config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert len(names) == ConfigDef.MAX_CONFIG_BACKUPS
+		# 가장 오래된 백업 2개는 삭제되고 최신 5개만 남아야 함
+		assert names[0] == config_manager.config_file.name + ".20261021-100002.bak"
 
 	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
 		"""백업 생성이 실패하면 기본 설정으로 동작하되 원본 설정 파일은 덮어쓰지 않아야 함."""
