@@ -270,7 +270,7 @@ def test_encode_all_follows_list_changes(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize("direction, expected", [
-	(MoveDirection.FIRST, ["c.mp4", "a.mp4", "b.mp4", "d.mp4"]),
+	(MoveDirection.FIRST, ["a.mp4", "c.mp4", "b.mp4", "d.mp4"]),	# 진행 중인 a.mp4 위로는 못 올라감
 	(MoveDirection.UP, ["a.mp4", "c.mp4", "b.mp4", "d.mp4"]),
 	(MoveDirection.DOWN, ["a.mp4", "b.mp4", "d.mp4", "c.mp4"]),
 	(MoveDirection.LAST, ["a.mp4", "b.mp4", "d.mp4", "c.mp4"]),
@@ -284,6 +284,25 @@ def test_move_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direction: M
 	assert encoder.move_file("c.mp4", direction) is True
 	assert filenames(encoder) == expected
 	assert encoder.files[encoder.current_file_index].filename == "a.mp4"
+
+
+@pytest.mark.parametrize("direction", [MoveDirection.FIRST, MoveDirection.UP])
+def test_move_file_cannot_pass_completed_or_in_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direction: MoveDirection):
+	"""처음으로·한칸위 이동은 완료·진행 중 파일보다 위로 올라가지 않는다. (중단 파일은 통과)"""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.files = [
+		FileInfo("done.mp4", FileStatus.COMPLETED),
+		FileInfo("now.mp4", FileStatus.IN_PROGRESS),
+		FileInfo("stopped.mp4", FileStatus.STOPPED),
+		FileInfo("a.mp4"),
+	]
+	encoder.current_file_index = 1
+
+	encoder.move_file("a.mp4", direction)
+	encoder.move_file("a.mp4", direction)
+
+	assert filenames(encoder) == ["done.mp4", "now.mp4", "a.mp4", "stopped.mp4"]
+	assert encoder.current_file_index == 1
 
 
 def test_move_file_at_edge_keeps_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
