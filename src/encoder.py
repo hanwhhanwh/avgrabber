@@ -374,6 +374,7 @@ class VideoEncoder:
 	def move_file(self, filename: str, direction: MoveDirection) -> bool:
 		"""
 		대기 중인 파일의 목록 내 위치를 이동합니다. (인코딩 순서도 함께 바뀜)
+		위쪽으로는 인코딩 완료·진행 중인 파일보다 위로 올라갈 수 없습니다.
 
 		Args:
 			filename (str): 이동할 파일명
@@ -394,7 +395,12 @@ class VideoEncoder:
 			MoveDirection.DOWN: index + 1,
 			MoveDirection.LAST: len(self.files) - 1
 		}
-		target = min(max(targets[direction], 0), len(self.files) - 1)
+		# 위쪽 한계: 이 파일 위에 있는 마지막 완료·진행 중 파일의 바로 아래
+		top_limit = 0
+		for i in range(index):
+			if (self.files[i].status in (FileStatus.COMPLETED, FileStatus.IN_PROGRESS)):
+				top_limit = i + 1
+		target = min(max(targets[direction], top_limit), len(self.files) - 1)
 
 		self.files.insert(target, self.files.pop(index))
 		self._sync_current_index(current)

@@ -171,7 +171,9 @@ function updateFileList(data) {
 	}
 	
 	let html = '';
-	data.files.forEach((file) => {
+	data.files.forEach((file, index) => {
+		// 바로 위가 완료·진행 중 파일이면 위로 이동 불가
+		const canMoveUp = index > 0 && !['completed', 'in_progress'].includes(data.files[index - 1].status);
 		const statusClass = `status-${file.status}`;
 		const itemClass = file.status;
 		
@@ -280,8 +282,8 @@ function updateFileList(data) {
 					<div class="file-header-right">
 						${file.status === 'pending' ? `
 						<div class="move-buttons">
-							<button onclick="moveFile('${file.filename}', 'first')">⏫ 처음으로</button>
-							<button onclick="moveFile('${file.filename}', 'up')">🔼 한칸위</button>
+							<button onclick="moveFile('${file.filename}', 'first')" ${canMoveUp ? '' : 'disabled'}>⏫ 처음으로</button>
+							<button onclick="moveFile('${file.filename}', 'up')" ${canMoveUp ? '' : 'disabled'}>🔼 한칸위</button>
 							<button onclick="moveFile('${file.filename}', 'down')">🔽 한칸아래</button>
 							<button onclick="moveFile('${file.filename}', 'last')">⏬ 마지막으로</button>
 						</div>

@@ -262,6 +262,13 @@ body {
 	color: white;
 }
 
+.move-buttons button:disabled {
+	border-color: #ccc;
+	background: white;
+	color: #ccc;
+	cursor: not-allowed;
+}
+
 .filename {
 	font-weight: bold;
 	font-size: 16px;
