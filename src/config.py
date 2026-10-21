@@ -75,20 +75,52 @@ class ConfigManager:
 
 
 	def _backup_config_file(self) -> Path:
-		"""현재 설정 파일을 '<파일명>.<YYYYmmdd-HHMMSS>.bak' 으로 복사하여 보관합니다.
-		같은 이름의 백업이 있으면 일련번호를 붙여 기존 백업을 덮어쓰지 않습니다.
+		"""현재 설정 파일을 '<파일명>.<YYYYmmdd-HHMMSS>[-N].bak' 으로 복사하여 보관합니다.
+		같은 시각의 백업이 있으면 일련번호를 키워 기존 백업을 덮어쓰지 않습니다.
+		보관 개수는 ConfigDef.MAX_CONFIG_BACKUPS 를 넘지 않도록 오래된 백업을 정리합니다.
 
 		Returns:
 			Path: 백업 파일 경로
 		"""
 		timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-		backup_file = self.config_file.with_name(f"{self.config_file.name}.{timestamp}.bak")
-		sequence = 1
-		while (backup_file.exists()):
-			backup_file = self.config_file.with_name(f"{self.config_file.name}.{timestamp}-{sequence}.bak")
-			sequence += 1
+		existing_backups = sorted(
+			self.config_file.parent.glob(f"{self.config_file.name}.{timestamp}*.bak")
+			, key=self._backup_order_key
+		)
+		sequence = (self._backup_order_key(existing_backups[-1])[1] + 1) if (existing_backups) else 0
+		suffix = f"-{sequence}" if (0 < sequence) else ""
+		backup_file = self.config_file.parent / f"{self.config_file.name}.{timestamp}{suffix}.bak"
+
 		shutil.copy2(self.config_file, backup_file)
+		self._prune_backups()
+
 		return backup_file
+
+
+	def _backup_order_key(self, backup_file: Path) -> tuple:
+		"""백업 파일명에서 (타임스탬프, 일련번호) 정렬 키를 만듭니다.
+
+		Args:
+			backup_file (Path): 백업 파일 경로
+
+		Returns:
+			tuple: (타임스탬프 문자열, 일련번호 정수) 튜플
+		"""
+		stem = backup_file.name[len(self.config_file.name) + 1:-len(".bak")]
+		timestamp = stem[:15]
+		sequence = stem[15:]
+
+		return (timestamp, int(sequence[1:]) if (sequence) else 0)
+
+
+	def _prune_backups(self) -> None:
+		"""최근 ConfigDef.MAX_CONFIG_BACKUPS 개만 남기고 오래된 설정 백업을 삭제합니다."""
+		backup_files = sorted(
+			self.config_file.parent.glob(f"{self.config_file.name}.*.bak")
+			, key=self._backup_order_key
+		)
+		for backup_file in backup_files[:-ConfigDef.MAX_CONFIG_BACKUPS]:
+			backup_file.unlink(missing_ok=True)
 
 
 	def reload(self) -> None:

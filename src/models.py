@@ -34,6 +34,7 @@ class ConfigDef:
     DEFAULT_CRF: Final[int] = 27
     DEFAULT_VOLUME: Final[float] = 1.15
     DEFAULT_AUDIO_BITRATE: Final[str] = "128k"
+    MAX_CONFIG_BACKUPS: Final[int] = 5
     HD_THRESHOLD: Final[int] = 700000
     HD_WIDTH: Final[int] = 1280
     FHD_WIDTH: Final[int] = 1920
