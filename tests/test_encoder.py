@@ -156,5 +156,15 @@ def test_svt_av1_bit_depth_from_config(tmp_path: Path, bit_depth: int, expected_
 	assert cmd[cmd.index("-pix_fmt") + 1] == expected_pix_fmt
 
 
+@pytest.mark.parametrize("codec, expected", [
+	("libsvtav1", {"codec": "libsvtav1", "preset": "4", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1}),
+	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265}),
+])
+def test_encode_settings(tmp_path: Path, codec: str, expected: Dict[str, Any]):
+	"""웹 UI 표시용 인코딩 설정은 실제 명령과 같은 코덱·preset·CRF 를 반환한다."""
+	encoder = make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: codec, ConfigKey.CRF: None})
+	assert encoder.get_encode_settings() == expected
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
