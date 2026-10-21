@@ -324,5 +324,41 @@ def test_move_file_rejects_non_pending(tmp_path: Path, monkeypatch: pytest.Monke
 	assert filenames(encoder) == ["a.mp4", "b.mp4"]
 
 
+def make_progress_file(duration: float, fps: float) -> FileInfo:
+	"""
+	길이·fps 가 지정된 진행률 계산용 FileInfo 를 만듭니다.
+
+	Args:
+		duration (float): 영상 길이(초)
+		fps (float): 영상 프레임레이트
+
+	Returns:
+		FileInfo: 테스트용 파일 정보
+	"""
+	file_info = FileInfo("a.mp4")
+	file_info.video_info.duration_seconds = duration
+	file_info.video_info.fps = fps
+	return file_info
+
+
+def test_progress_uses_frame_count(tmp_path: Path):
+	"""진행률은 time 값이 앞서 있어도 프레임 수 기준으로 계산한다."""
+	file_info = make_progress_file(100.0, 30.0)	# 전체 3000 프레임
+	line = "frame= 1500 fps= 40 q=34.0 size=  1024KiB time=00:01:38.00 bitrate= 85.6kbits/s speed=2.6x elapsed=0:00:37.50"
+
+	assert make_encoder(tmp_path).parse_progress(line, file_info) is True
+	assert file_info.progress.progress_percent == pytest.approx(50.0)
+	assert file_info.progress.time == "00:01:38.00"
+
+
+def test_progress_falls_back_to_time_without_fps(tmp_path: Path):
+	"""영상 fps 정보가 없으면 time 기준으로 계산한다."""
+	file_info = make_progress_file(100.0, 0.0)
+	line = "frame= 1500 fps= 40 q=34.0 size=  1024KiB time=00:00:25.00 bitrate= 85.6kbits/s speed=2.6x"
+
+	make_encoder(tmp_path).parse_progress(line, file_info)
+	assert file_info.progress.progress_percent == pytest.approx(25.0)
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
