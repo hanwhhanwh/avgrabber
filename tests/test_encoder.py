@@ -123,5 +123,21 @@ def test_x265_command_options(tmp_path: Path):
 	assert "-pix_fmt" not in cmd
 
 
+@pytest.mark.parametrize("codec, expected_crf", [
+	("libsvtav1", ConfigDef.DEFAULT_CRF_SVT_AV1),
+	("libx265", ConfigDef.DEFAULT_CRF_X265),
+])
+def test_crf_defaults_to_codec_recommendation(tmp_path: Path, codec: str, expected_crf: int):
+	"""crf 가 null 이면 코덱별 권장 CRF 를 사용한다."""
+	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: codec, ConfigKey.CRF: None}))
+	assert cmd[cmd.index("-crf:v") + 1] == str(expected_crf)
+
+
+def test_explicit_crf_overrides_recommendation(tmp_path: Path):
+	"""crf 값이 지정되어 있으면 코덱과 관계없이 그 값을 사용한다."""
+	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: "libx265", ConfigKey.CRF: 22}))
+	assert cmd[cmd.index("-crf:v") + 1] == "22"
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
