@@ -117,7 +117,7 @@ function updateFileElement(element, file) {
 					<span class="progress-label">Size:</span> ${file.progress.size}
 				</div>
 				<div class="progress-item">
-					<span class="progress-label">Time:</span> ${file.progress.time}
+					<span class="progress-label">Time:</span> ${formatTimeWithEta(file)}
 				</div>
 				<div class="progress-item">
 					<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
@@ -258,7 +258,7 @@ function updateFileList(data) {
 						<span class="progress-label">Size:</span> ${file.progress.size}
 					</div>
 					<div class="progress-item">
-						<span class="progress-label">Time:</span> ${file.progress.time}
+						<span class="progress-label">Time:</span> ${formatTimeWithEta(file)}
 					</div>
 					<div class="progress-item">
 						<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
@@ -297,6 +297,29 @@ function formatDuration(seconds) {
 	const m = Math.floor((seconds % 3600) / 60);
 	const s = Math.floor(seconds % 60);
 	return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+
+// "HH:MM:SS.ms" 형식의 FFmpeg 시간 문자열을 초 단위로 변환 (형식이 다르면 null)
+function parseTimeToSeconds(timeStr) {
+	const parts = (timeStr || '').split(':');
+	if (parts.length !== 3) return null;
+	const seconds = parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2]);
+	return isNaN(seconds) ? null : seconds;
+}
+
+
+// 인코딩된 영상 시간 뒤에 남은 예상 시간((전체 길이 - 현재 위치) / speed)을 붙여 반환
+function formatTimeWithEta(file) {
+	const current = parseTimeToSeconds(file.progress.time);
+	const speed = parseFloat(file.progress.speed);
+	const duration = file.video_info ? file.video_info.duration : 0;
+
+	let eta = '--:--:--';
+	if (current !== null && speed > 0 && duration > 0) {
+		eta = formatDuration(Math.max(duration - current, 0) / speed);
+	}
+	return `${file.progress.time} (남은 예상 시간 = ${eta})`;
 }
 
 
