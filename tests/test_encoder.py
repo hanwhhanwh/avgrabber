@@ -139,5 +139,22 @@ def test_explicit_crf_overrides_recommendation(tmp_path: Path):
 	assert cmd[cmd.index("-crf:v") + 1] == "22"
 
 
+def test_svt_av1_preset_from_config(tmp_path: Path):
+	"""svtav1_preset 설정 값이 -preset:v 로 전달된다."""
+	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.SVTAV1_PRESET: 8}))
+	assert cmd[cmd.index("-preset:v") + 1] == "8"
+
+
+@pytest.mark.parametrize("bit_depth, expected_pix_fmt", [
+	(8, "yuv420p"),
+	(10, "yuv420p10le"),
+	(12, "yuv420p10le"),	# 지원하지 않는 값은 기본 10비트로 대체
+])
+def test_svt_av1_bit_depth_from_config(tmp_path: Path, bit_depth: int, expected_pix_fmt: str):
+	"""svtav1_bit_depth 설정에 따라 픽셀 포맷이 결정된다."""
+	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.SVTAV1_BIT_DEPTH: bit_depth}))
+	assert cmd[cmd.index("-pix_fmt") + 1] == expected_pix_fmt
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
