@@ -6,6 +6,7 @@
 import json
 import argparse
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Dict
 
@@ -69,9 +70,20 @@ class ConfigManager:
 		return self.config.get(key, default)
 
 
+	def _backup_config_file(self) -> Path:
+		"""현재 설정 파일을 '<파일명>.bak' 으로 복사하여 보관합니다.
+
+		Returns:
+			Path: 백업 파일 경로
+		"""
+		backup_file = self.config_file.with_name(self.config_file.name + ".bak")
+		shutil.copy2(self.config_file, backup_file)
+		return backup_file
+
+
 	def reload(self) -> None:
 		"""설정 파일이 존재하면 로드하고, 없으면 기본 설정으로 새 파일을 생성합니다.
-		로드한 내용이 객체(dict)가 아니면 기본 설정으로 대체합니다.
+		로드한 내용이 객체(dict)가 아니면 원본을 .bak 으로 보관한 뒤 기본 설정으로 대체합니다.
 		"""
 		if (self.config_file.exists()):
 			self.logger.info(f"Settings loaded: {self.config_file}")
@@ -80,7 +92,8 @@ class ConfigManager:
 			if (isinstance(loaded_config, dict)):
 				self.config = loaded_config
 			else:
-				self.logger.warning(f"Invalid settings format, use defaults: {self.config_file}")
+				backup_file = self._backup_config_file()
+				self.logger.warning(f"Invalid settings format, backup to {backup_file}, use defaults: {self.config_file}")
 				self.config = self._get_default_config()
 				self._save_config()
 		else:
