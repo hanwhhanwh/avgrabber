@@ -15,6 +15,7 @@ class ConfigKey:
     OUTPUT_DIR: Final[str] = "output_dir"
     SUBTITLE_DIR: Final[str] = "subtitle_dir"
     LOG_DIR: Final[str] = "log_dir"
+    VIDEO_CODEC: Final[str] = "video_codec"
     CRF: Final[str] = "crf"
     VOLUME: Final[str] = "volume"
     AUDIO_BITRATE: Final[str] = "audio_bitrate"
@@ -31,6 +32,7 @@ class ConfigDef:
     DEFAULT_OUTPUT_DIR: Final[str] = "/home/secc/tmp/_encoded"
     DEFAULT_SUBTITLE_DIR: Final[str] = "/home/secc/tmp/subs"
     DEFAULT_LOG_DIR: Final[str] = "logs"
+    DEFAULT_VIDEO_CODEC: Final[str] = "libsvtav1"
     DEFAULT_CRF: Final[int] = 27
     DEFAULT_VOLUME: Final[float] = 1.15
     DEFAULT_AUDIO_BITRATE: Final[str] = "128k"
@@ -52,6 +54,14 @@ class FileStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     STOPPED = "stopped"
+
+
+class VideoCodec(Enum):
+    """
+    영상 인코딩에 사용할 FFmpeg 코덱(인코더 이름)을 나타내는 열거형.
+    """
+    SVT_AV1 = "libsvtav1"
+    X265 = "libx265"
 
 
 class ResolutionMode(Enum):

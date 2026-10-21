@@ -19,7 +19,7 @@ import argparse
 
 from src.models import (
 	ConfigDef, ConfigKey, FileInfo, FileStatus,
-	ProgressInfo, ResolutionMode, VideoInfo
+	ProgressInfo, ResolutionMode, VideoCodec, VideoInfo
 )
 from src.config import ConfigManager
 from src.ws_manager import WebSocketManager
@@ -340,6 +340,22 @@ class VideoEncoder:
 		return False
 
 
+	def get_video_codec(self) -> VideoCodec:
+		"""
+		설정의 video_codec 값을 VideoCodec 으로 변환합니다.
+		값이 없거나 지원하지 않는 코덱이면 기본 코덱(SVT-AV1)을 사용합니다.
+
+		Returns:
+			VideoCodec: 인코딩에 사용할 영상 코덱
+		"""
+		codec_name = self.config.get(ConfigKey.VIDEO_CODEC, ConfigDef.DEFAULT_VIDEO_CODEC)
+		try:
+			return VideoCodec(codec_name)
+		except ValueError:
+			print(f"지원하지 않는 video_codec '{codec_name}', 기본값 {ConfigDef.DEFAULT_VIDEO_CODEC} 사용")
+			return VideoCodec(ConfigDef.DEFAULT_VIDEO_CODEC)
+
+
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
 		"""FileInfo를 기반으로 FFmpeg 인코딩 명령어 리스트를 생성합니다.
 
@@ -365,12 +381,20 @@ class VideoEncoder:
 			subtitle_path = self.subtitle_dir / subtitle_file.name
 			cmd.extend(["-i", str(subtitle_path)])
 
+		video_codec = self.get_video_codec()
 		cmd.extend([
 			"-f", "mp4",
-			"-c:v", "libx265",
-			"-crf:v", str(self.config.get(ConfigKey.CRF)),
-			"-preset:v", "slow",
-			"-tune:v", "ssim",
+			"-c:v", video_codec.value,
+			"-crf:v", str(self.config.get(ConfigKey.CRF))
+		])
+
+		# 코덱별 전용 옵션 (libsvtav1 은 -tune 옵션이 없어 svtav1-params 로 전달)
+		if (video_codec == VideoCodec.X265):
+			cmd.extend(["-preset:v", "slow", "-tune:v", "ssim"])
+		else:
+			cmd.extend(["-preset:v", "6", "-pix_fmt", "yuv420p10le", "-svtav1-params", "tune=0"])
+
+		cmd.extend([
 			"-avoid_negative_ts", "make_zero",
 			"-fps_mode", "cfr",
 			"-movflags", "+faststart"
@@ -686,6 +710,7 @@ class VideoEncoder:
 		print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
 		print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
 		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
+		print(f"영상 코덱: {self.get_video_codec().value}")
 		print(f"CRF: {config.get(ConfigKey.CRF)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")

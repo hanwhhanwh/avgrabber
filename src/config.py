@@ -51,6 +51,7 @@ class ConfigManager:
 			, ConfigKey.OUTPUT_DIR: ConfigDef.DEFAULT_OUTPUT_DIR
 			, ConfigKey.SUBTITLE_DIR: ConfigDef.DEFAULT_SUBTITLE_DIR
 			, ConfigKey.LOG_DIR: ConfigDef.DEFAULT_LOG_DIR
+			, ConfigKey.VIDEO_CODEC: ConfigDef.DEFAULT_VIDEO_CODEC
 			, ConfigKey.CRF: ConfigDef.DEFAULT_CRF
 			, ConfigKey.VOLUME: ConfigDef.DEFAULT_VOLUME
 			, ConfigKey.AUDIO_BITRATE: ConfigDef.DEFAULT_AUDIO_BITRATE

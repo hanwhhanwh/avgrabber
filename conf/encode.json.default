@@ -5,6 +5,7 @@
   "output_dir": "/path/to/output_dir",
   "subtitle_dir": "/path/to/sub_dir",
   "log_dir": "logs",
+  "video_codec": "libsvtav1",
   "crf": 27,
   "volume": 1.15,
   "audio_bitrate": "128k"
