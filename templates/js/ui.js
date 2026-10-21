@@ -326,9 +326,13 @@ function formatTimeWithEta(file) {
 	const current = parseTimeToSeconds(file.progress.time);
 	const speed = parseFloat(file.progress.speed);
 	const duration = file.video_info ? file.video_info.duration : 0;
+	// 프레임 기준((전체 프레임 - 현재 프레임) / 인코딩 fps), 불가하면 time 기준((전체 길이 - 현재 위치) / speed)
+	const totalFrames = file.video_info ? duration * file.video_info.fps : 0;
 
 	let eta = '--:--:--';
-	if (current !== null && speed > 0 && duration > 0) {
+	if (totalFrames > 0 && file.progress.fps > 0) {
+		eta = formatDuration(Math.max(totalFrames - file.progress.frame, 0) / file.progress.fps);
+	} else if (current !== null && speed > 0 && duration > 0) {
 		eta = formatDuration(Math.max(duration - current, 0) / speed);
 	}
 	return `${file.progress.time} (남은 예상 시간 = ${eta})`;
