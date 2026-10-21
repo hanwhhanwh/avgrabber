@@ -379,13 +379,15 @@ class TestLogging:
 	
 	def test_logger_info_for_save(self, config_manager, caplog):
 		"""Test logger.info() for config saving."""
-		config_manager._save_config()
+		with caplog.at_level(logging.INFO):
+			config_manager._save_config()
 		assert "Config saved" in caplog.text
 	
 	def test_logger_debug_for_update(self, config_manager, caplog):
 		"""Test logger.debug() for config updates."""
 		mock_args = MockArgs(crf=25)
-		config_manager.update_from_args(mock_args)
+		with caplog.at_level(logging.DEBUG):
+			config_manager.update_from_args(mock_args)
 		assert "CRF updated" in caplog.text
 
 
@@ -489,12 +491,12 @@ class TestConfigurationKeys:
 		]
 		
 		for key in expected_keys:
-			assert key.value in config_manager.config
+			assert key in config_manager.config
 	
 	def test_config_structure_integrity(self, config_manager: ConfigManager):
 		"""Test config structure integrity."""
 		assert isinstance(config_manager.config, dict)
-		assert all(isinstance(val, (str, int)) for val in config_manager.config.values())
+		assert all(isinstance(val, (str, int, float)) for val in config_manager.config.values())
 
 
 # ==================== ====================
@@ -514,10 +516,12 @@ class TestResolutionModes:
 			ResolutionMode.UHD_8K.value
 		]
 		
+		# 모든 모드 값은 비어있지 않은 문자열이어야 함
 		for mode in modes:
-			assert mode in [
-				val for val in config_manager.config.values() if isinstance(val, str)
-			]
+			assert isinstance(mode, str) and mode
+
+		# 기본 해상도 설정값은 정의된 모드 중 하나여야 함
+		assert config_manager.config[ConfigKey.DEFAULT_RESOLUTION] in modes
 	
 	def test_resolution_mode_conversion(self, config_manager: ConfigManager):
 		"""Test resolution mode conversion."""

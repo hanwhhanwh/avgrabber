@@ -240,11 +240,10 @@ class TestResolutionMode:
         
     def test_all_modes_valid(self):
         """모든 모달리티 유효성 확인."""
-        assert ResolutionMode.HD in ResolutionMode
-        assert ResolutionMode.FHD in ResolutionMode
-        assert ResolutionMode.SD in ResolutionMode
-        assert ResolutionMode.UHD in ResolutionMode
-        assert ResolutionMode.SUPER_UHD in ResolutionMode
+        expected_values = {"SD", "HD", "FHD", "4K", "8K"}
+        assert {mode.value for mode in ResolutionMode} == expected_values
+        for mode in ResolutionMode:
+            assert isinstance(mode.value, str)
 
 # =========================================================
 # Section 5: ProgressInfo 테스트 (4 items)
