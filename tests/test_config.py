@@ -473,6 +473,18 @@ class TestErrorHandling:
 		except Exception as e:
 			assert "Invalid" in str(type(e).__name__)
 
+	def test_invalid_config_backed_up(self, config_manager: ConfigManager):
+		"""객체가 아닌 설정 파일은 .bak 으로 보관되고 기본 설정으로 대체되어야 함."""
+		config_manager.config_file.write_text("[]")
+
+		config_manager.reload()
+
+		backup_file = config_manager.config_file.with_name(config_manager.config_file.name + ".bak")
+		assert backup_file.exists()
+		assert backup_file.read_text(encoding='utf-8') == "[]"
+		assert isinstance(config_manager.config, dict)
+		assert config_manager.config[ConfigKey.FFMPEG_PATH] == ConfigDef.DEFAULT_FFMPEG
+
 
 # ==================== ====================
 # Test Suite: Configuration Keys
