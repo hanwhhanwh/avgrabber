@@ -232,7 +232,6 @@ function updateFileList(data) {
 					</div>
 					` : ''}
 				</div>
-				${resolutionSelector}
 			`;
 		}
 		
@@ -278,15 +277,18 @@ function updateFileList(data) {
 						${file.output_filename && file.output_filename !== file.filename ? 
 							`<span class="output-filename">→ ${file.output_filename}</span>` : ''}
 					</div>
-					${file.status === 'pending' ? `
-					<div class="move-buttons">
-						<button onclick="moveFile('${file.filename}', 'first')">⏫ 처음으로</button>
-						<button onclick="moveFile('${file.filename}', 'up')">🔼 한칸위</button>
-						<button onclick="moveFile('${file.filename}', 'down')">🔽 한칸아래</button>
-						<button onclick="moveFile('${file.filename}', 'last')">⏬ 마지막으로</button>
+					<div class="file-header-right">
+						${file.status === 'pending' ? `
+						<div class="move-buttons">
+							<button onclick="moveFile('${file.filename}', 'first')">⏫ 처음으로</button>
+							<button onclick="moveFile('${file.filename}', 'up')">🔼 한칸위</button>
+							<button onclick="moveFile('${file.filename}', 'down')">🔽 한칸아래</button>
+							<button onclick="moveFile('${file.filename}', 'last')">⏬ 마지막으로</button>
+						</div>
+						` : ''}
+						${resolutionSelector}
+						<span class="status-badge ${statusClass}">${file.status}</span>
 					</div>
-					` : ''}
-					<span class="status-badge ${statusClass}">${file.status}</span>
 				</div>
 				${videoInfoHtml}
 				${progressBarHtml}
