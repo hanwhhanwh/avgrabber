@@ -538,6 +538,79 @@ class TestErrorHandling:
 		# 가장 오래된 백업 2개는 삭제되고 최신 5개만 남아야 함
 		assert names[0] == config_manager.config_file.name + ".20261021-100002.bak"
 
+	def test_backup_protects_newest_when_same_second(self, config_manager: ConfigManager, monkeypatch):
+		"""같은 초에 보관 한도를 넘겨도 방금 만든 최신 백업은 남아야 함."""
+		class FixedDatetime:
+			@classmethod
+			def now(cls):
+				return datetime(2026, 10, 21, 10, 0, 0)
+
+		monkeypatch.setattr("src.config.datetime", FixedDatetime)
+
+		for _ in range(ConfigDef.MAX_CONFIG_BACKUPS + 2):
+			config_manager.config_file.write_text("[]")
+			config_manager.reload()
+
+		names = sorted(path.name for path in config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		newest = f"{config_manager.config_file.name}.20261021-100000-{ConfigDef.MAX_CONFIG_BACKUPS + 1}.bak"
+		assert len(names) == ConfigDef.MAX_CONFIG_BACKUPS
+		assert newest in names
+
+	def test_prune_respects_protect(self, config_manager: ConfigManager):
+		"""정리 시 보호 대상으로 지정한 백업은 삭제하지 않아야 함."""
+		for index in range(ConfigDef.MAX_CONFIG_BACKUPS + 1):
+			backup_file = config_manager.config_file.parent / f"{config_manager.config_file.name}.20261021-1000{index:02d}.bak"
+			backup_file.write_text(str(index))
+
+		protected_file = config_manager.config_file.parent / f"{config_manager.config_file.name}.20261021-100000.bak"
+		config_manager._prune_backups(protect=protected_file)
+
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert protected_file.exists()
+		assert len(backup_files) == ConfigDef.MAX_CONFIG_BACKUPS + 1
+
+	def test_prune_failure_does_not_break_reload(self, config_manager: ConfigManager, monkeypatch):
+		"""오래된 백업 삭제가 실패해도 설정 로드는 계속되어야 함."""
+		original_unlink = Path.unlink
+
+		def failing_unlink(self, missing_ok: bool = False):
+			if (self.name.endswith(".bak")):
+				raise OSError("unlink failed")
+			return original_unlink(self, missing_ok=missing_ok)
+
+		monkeypatch.setattr(Path, "unlink", failing_unlink)
+
+		for _ in range(ConfigDef.MAX_CONFIG_BACKUPS + 1):
+			config_manager.config_file.write_text("[]")
+			config_manager.reload()
+
+		assert config_manager.config[ConfigKey.CRF] == ConfigDef.DEFAULT_CRF
+		# 삭제에 실패했으므로 백업이 한도보다 많이 남아 있음
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert ConfigDef.MAX_CONFIG_BACKUPS < len(backup_files)
+
+	def test_save_skipped_after_backup_failure(self, config_manager: ConfigManager, monkeypatch):
+		"""백업 실패 후에는 원본을 덮어쓰지 않도록 저장을 건너뛰어야 함."""
+		config_manager.config_file.write_text("[]")
+
+		def raise_backup_error(*args, **kwargs):
+			raise OSError("backup failed")
+
+		with monkeypatch.context() as patch:
+			patch.setattr("src.config.shutil.copy2", raise_backup_error)
+			config_manager.reload()
+
+		config_manager.config[ConfigKey.CRF] = 33
+		config_manager._save_config()
+		assert config_manager.config_file.read_text(encoding='utf-8') == "[]"
+
+		# 정상 설정을 다시 읽으면 저장 차단이 해제되어야 함
+		config_manager.config_file.write_text('{"crf": 21}')
+		config_manager.reload()
+		config_manager.config[ConfigKey.CRF] = 31
+		config_manager._save_config()
+		assert json.loads(config_manager.config_file.read_text(encoding='utf-8'))[ConfigKey.CRF] == 31
+
 	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
 		"""백업 생성이 실패하면 기본 설정으로 동작하되 원본 설정 파일은 덮어쓰지 않아야 함."""
 		config_manager.config_file.write_text("[]")
