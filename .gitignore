@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 config/db.ini
 conf/encode.json
-conf/encode.json.bak
+conf/encode.json.*.bak
 
 # 임시 작업 폴더
 .tmp/

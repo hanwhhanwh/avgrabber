@@ -7,6 +7,7 @@ import json
 import argparse
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -71,12 +72,18 @@ class ConfigManager:
 
 
 	def _backup_config_file(self) -> Path:
-		"""현재 설정 파일을 '<파일명>.bak' 으로 복사하여 보관합니다.
+		"""현재 설정 파일을 '<파일명>.<YYYYmmdd-HHMMSS>.bak' 으로 복사하여 보관합니다.
+		같은 이름의 백업이 있으면 일련번호를 붙여 기존 백업을 덮어쓰지 않습니다.
 
 		Returns:
 			Path: 백업 파일 경로
 		"""
-		backup_file = self.config_file.with_name(self.config_file.name + ".bak")
+		timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+		backup_file = self.config_file.with_name(f"{self.config_file.name}.{timestamp}.bak")
+		sequence = 1
+		while (backup_file.exists()):
+			backup_file = self.config_file.with_name(f"{self.config_file.name}.{timestamp}-{sequence}.bak")
+			sequence += 1
 		shutil.copy2(self.config_file, backup_file)
 		return backup_file
 
