@@ -345,6 +345,29 @@ body {
 	color: #667eea;
 }
 
+/* 진행 중 파일 카드: 정보 항목을 내용 길이만큼 한 줄로 배치하고 여백을 줄여 높이를 압축 */
+.file-item.in_progress {
+	padding: 12px 20px;
+}
+
+.file-item.in_progress .file-header {
+	margin-bottom: 6px;
+}
+
+.file-item.in_progress .video-info,
+.file-item.in_progress .progress-info {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 18px;
+	padding: 6px 10px;
+	margin: 0;
+}
+
+.file-item.in_progress .progress-bar-container {
+	height: 18px;
+	margin: 6px 0;
+}
+
 .empty-state {
 	text-align: center;
 	padding: 60px 20px;
