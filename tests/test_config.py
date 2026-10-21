@@ -569,6 +569,28 @@ class TestErrorHandling:
 		assert protected_file.exists()
 		assert len(backup_files) == ConfigDef.MAX_CONFIG_BACKUPS + 1
 
+	def test_backup_order_key_rejects_unknown_name(self, config_manager: ConfigManager):
+		"""백업명 규칙을 벗어난 파일은 정렬 키가 없어야 함."""
+		unknown_file = config_manager.config_file.parent / (config_manager.config_file.name + ".old.bak")
+		unknown_file.write_text("unknown")
+
+		assert config_manager._backup_order_key(unknown_file) is None
+
+	def test_prune_ignores_unknown_names(self, config_manager: ConfigManager):
+		"""백업명 규칙을 벗어난 파일은 정리 대상에서 제외되어야 함."""
+		unknown_file = config_manager.config_file.parent / (config_manager.config_file.name + ".old.bak")
+		unknown_file.write_text("keep me")
+
+		for index in range(ConfigDef.MAX_CONFIG_BACKUPS + 2):
+			backup_file = config_manager.config_file.parent / f"{config_manager.config_file.name}.20261021-1000{index:02d}.bak"
+			backup_file.write_text(str(index))
+
+		config_manager._prune_backups()
+
+		backup_files = list(config_manager.config_file.parent.glob(config_manager.config_file.name + ".*.bak"))
+		assert unknown_file.exists()
+		assert len(backup_files) == ConfigDef.MAX_CONFIG_BACKUPS + 1
+
 	def test_prune_failure_does_not_break_reload(self, config_manager: ConfigManager, monkeypatch):
 		"""오래된 백업 삭제가 실패해도 설정 로드는 계속되어야 함."""
 		original_unlink = Path.unlink
@@ -601,14 +623,14 @@ class TestErrorHandling:
 			config_manager.reload()
 
 		config_manager.config[ConfigKey.CRF] = 33
-		config_manager._save_config()
+		assert config_manager._save_config() is False
 		assert config_manager.config_file.read_text(encoding='utf-8') == "[]"
 
 		# 정상 설정을 다시 읽으면 저장 차단이 해제되어야 함
 		config_manager.config_file.write_text('{"crf": 21}')
 		config_manager.reload()
 		config_manager.config[ConfigKey.CRF] = 31
-		config_manager._save_config()
+		assert config_manager._save_config() is True
 		assert json.loads(config_manager.config_file.read_text(encoding='utf-8'))[ConfigKey.CRF] == 31
 
 	def test_backup_failure_keeps_original(self, config_manager: ConfigManager, monkeypatch):
