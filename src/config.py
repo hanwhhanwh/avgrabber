@@ -54,18 +54,23 @@ class ConfigManager:
 		}
 
 
-	def _save_config(self) -> None:
+	def _save_config(self) -> bool:
 		"""현재 설정을 JSON 파일로 저장합니다. 필요 시 상위 디렉토리도 생성합니다.
 		원본 설정 백업에 실패한 상태라면 원본 보존을 위해 저장을 건너뜁니다.
+
+		Returns:
+			bool: 파일에 저장했으면 True, 백업 실패로 건너뛰었으면 False
 		"""
 		if (self.backup_failed):
 			self.logger.warning(f"Skip saving settings, original backup failed: {self.config_file}")
-			return
+			return False
 
 		self.config_file.parent.mkdir(parents=True, exist_ok=True)
 		with open(self.config_file, 'w', encoding='utf-8') as f:
 			json.dump(self.config, f, indent=2, ensure_ascii=False)
 		self.logger.info(f"Config saved to {self.config_file}")
+
+		return True
 
 
 	def get(self, key: str, default: Any=None) -> Any:
