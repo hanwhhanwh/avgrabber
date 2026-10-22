@@ -109,7 +109,7 @@ def test_svt_av1_command_options(tmp_path: Path):
 	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: "libsvtav1", ConfigKey.CRF: 30}))
 	assert cmd[cmd.index("-c:v") + 1] == "libsvtav1"
 	assert cmd[cmd.index("-crf:v") + 1] == "30"
-	assert cmd[cmd.index("-preset:v") + 1] == "4"
+	assert cmd[cmd.index("-preset:v") + 1] == "3"
 	assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p10le"
 	assert cmd[cmd.index("-svtav1-params") + 1] == "tune=0"
 	assert "-tune:v" not in cmd
@@ -159,7 +159,7 @@ def test_svt_av1_bit_depth_from_config(tmp_path: Path, bit_depth: int, expected_
 
 
 @pytest.mark.parametrize("codec, expected", [
-	("libsvtav1", {"codec": "libsvtav1", "preset": "4", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1}),
+	("libsvtav1", {"codec": "libsvtav1", "preset": "3", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1}),
 	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265}),
 ])
 def test_encode_settings(tmp_path: Path, codec: str, expected: Dict[str, Any]):

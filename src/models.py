@@ -35,7 +35,7 @@ class ConfigDef:
     DEFAULT_SUBTITLE_DIR: Final[str] = "/home/secc/tmp/subs"
     DEFAULT_LOG_DIR: Final[str] = "logs"
     DEFAULT_VIDEO_CODEC: Final[str] = "libsvtav1"
-    DEFAULT_SVTAV1_PRESET: Final[int] = 4
+    DEFAULT_SVTAV1_PRESET: Final[int] = 3
     DEFAULT_SVTAV1_BIT_DEPTH: Final[int] = 10
     DEFAULT_CRF: Final[Optional[int]] = None    # None 이면 코덱별 권장 CRF 사용
     DEFAULT_CRF_SVT_AV1: Final[int] = 30
