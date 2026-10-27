@@ -18,7 +18,9 @@ if (_project_root not in sys.path):
 	sys.path.insert(0, _project_root)
 
 from src.encoder import VideoEncoder
-from src.models import ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection, VideoCodec
+from src.models import (
+	ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection, ResolutionMode, VideoCodec, VideoInfo
+)
 
 
 class StubConfig:
@@ -491,6 +493,67 @@ def test_refresh_does_not_touch_completed_subtitle(tmp_path: Path, monkeypatch: 
 	assert encoder.files[0].subtitle_file is None
 	assert encoder.files[0].output_filename == "ABC-123-SD-D.mp4"
 	assert ws.broadcast_all_status.await_count == 0
+
+
+@pytest.mark.parametrize("filename", [
+	"ABC-123-S.mp4",
+	"ABC-123-FHD-S.mp4",
+	"ABC-123-HU-S.mp4",
+])
+def test_output_filename_keeps_subtitle_marker_without_subtitle(tmp_path: Path, filename: str):
+	"""입력 파일명이 ...-S 형식이면 자막 파일이 없어도 -S를 유지한다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / filename, VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD-S.mp4"
+
+
+def test_output_filename_keeps_subtitle_marker_in_encoded_name(tmp_path: Path):
+	"""이미 완성된 출력 형식(...-FHD-S)을 다시 넣어도 같은 이름이 나온다."""
+	encoder = make_encoder(tmp_path)
+	video_info = VideoInfo()
+	video_info.pixel_count = ConfigDef.HD_THRESHOLD
+
+	output = encoder.generate_output_filename(
+		tmp_path / "ABC-123-FHD-S.mp4", video_info, None, ResolutionMode.FHD
+	)
+
+	assert output == "ABC-123-FHD-S.mp4"
+
+
+def test_output_filename_without_marker_or_subtitle_has_no_s(tmp_path: Path):
+	"""입력 파일명에 -S가 없고 자막도 없으면 -S를 붙이지 않는다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / "ABC-123.mp4", VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD.mp4"
+
+
+def test_output_filename_ignores_unrelated_s_suffix(tmp_path: Path):
+	"""출력 형식이 아닌 -S로 끝나는 이름에는 -S를 덧붙이지 않는다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / "ABC-123-SPECIAL.mp4", VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD.mp4"
+
+
+def test_output_filename_keeps_s_with_uncensored_marker(tmp_path: Path):
+	"""무수정 파일명(...-FHU-S)도 자막이 없으면 -S를 유지한다."""
+	encoder = make_encoder(tmp_path)
+	input_file = tmp_path / "ABC-123-FHU-S.mp4"
+
+	output = encoder.generate_output_filename(
+		input_file,
+		VideoInfo(),
+		None,
+		ResolutionMode.HD,
+		use_uncensored=encoder.check_uncensored_pattern(input_file.name)
+	)
+
+	assert output == "ABC-123-SU-S.mp4"
 
 
 def test_finalize_completion_records_size_and_elapsed(tmp_path: Path):
