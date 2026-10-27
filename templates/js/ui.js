@@ -160,10 +160,20 @@ function buildProgressInfoHtml(file) {
 	}
 
 	if (file.status === 'completed') {
+		const sizeDetail = (0 < file.input_size)
+			? ` (원본 ${formatFileSize(file.input_size)} / ${formatCompressionRate(file.output_size, file.input_size)})`
+			: '';
+		const outputItem = file.output_filename
+			? `<div class="progress-item">
+					<span class="progress-label">출력:</span> ${file.output_filename}
+				</div>`
+			: '';
+
 		return `
 			<div class="progress-info completed-info">
+				${outputItem}
 				<div class="progress-item">
-					<span class="progress-label">파일크기:</span> ${formatFileSize(file.output_size)}
+					<span class="progress-label">파일크기:</span> ${formatFileSize(file.output_size)}${sizeDetail}
 				</div>
 				<div class="progress-item">
 					<span class="progress-label">소요시간:</span> ${formatDuration(file.elapsed_seconds)}
@@ -249,7 +259,7 @@ function updateFileList(data) {
 						${scale}
 					</div>
 					${file.output_filename ? `
-					<div class="info-item">
+					<div class="info-item output-info-item">
 						<span class="info-icon">📤</span>
 						<span class="info-label">출력:</span> ${file.output_filename}
 					</div>
@@ -322,6 +332,14 @@ function formatFileSize(bytes) {
 		unit++;
 	}
 	return `${value.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
+}
+
+
+// 압축률 = (원본 크기 - 출력 크기) / 원본 크기 * 100
+function formatCompressionRate(outputBytes, inputBytes) {
+	if (!outputBytes || !inputBytes || inputBytes <= 0) return '-';
+	const rate = Math.max(0, (1 - outputBytes / inputBytes) * 100);
+	return `${rate.toFixed(1)}%`;
 }
 
 

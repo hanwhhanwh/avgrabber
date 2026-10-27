@@ -586,5 +586,32 @@ def test_finalize_completion_copies_subtitle_with_original_extension(tmp_path: P
 	assert (tmp_path / "ABC-123-SD-D-S.ass").exists()
 
 
+def test_finalize_completion_fills_input_size_when_missing(tmp_path: Path):
+	"""완료 처리 시 원본 크기가 비어 있으면 입력 파일에서 채운다."""
+	encoder = make_encoder(tmp_path)
+	input_file = tmp_path / "ABC-123.mp4"
+	input_file.write_bytes(b"x" * 512)
+	file_info = FileInfo("ABC-123.mp4")
+	file_info.output_filename = "ABC-123-SD.mp4"
+	(tmp_path / file_info.output_filename).write_bytes(b"x" * 128)
+
+	encoder._finalize_completion(file_info, time.monotonic())
+
+	assert file_info.input_size == 512
+
+
+def test_create_file_info_sets_input_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""파일 정보 생성 시 원본 파일 크기를 기록한다."""
+	encoder = make_encoder(tmp_path)
+	encoder.resolution_mode = ResolutionMode.HD
+	video_file = tmp_path / "ABC-123.mp4"
+	video_file.write_bytes(b"x" * 123)
+	monkeypatch.setattr(encoder, "get_video_info_with_ffprobe", AsyncMock(return_value=VideoInfo()))
+
+	file_info = asyncio.run(encoder.create_file_info(video_file))
+
+	assert file_info.input_size == 123
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])

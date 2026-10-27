@@ -402,8 +402,9 @@ class TestFileInfo:
         assert info.subtitle_file == "test.vtt"
 
     def test_initial_output_size_and_elapsed_are_zero(self):
-        """완료 정보(출력 크기·소요 시간)는 0으로 초기화된다."""
+        """완료 정보(입력·출력 크기·소요 시간)는 0으로 초기화된다."""
         info = FileInfo("test_video.mp4")
+        assert info.input_size == 0
         assert info.output_size == 0
         assert info.elapsed_seconds == 0.0
 
@@ -432,6 +433,7 @@ class TestFileInfoToDict:
         assert "subtitle" in result
         assert "scale" in result
         assert "resolution_mode" in result
+        assert "input_size" in result
         assert "output_size" in result
         assert "elapsed_seconds" in result
 
