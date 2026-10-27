@@ -405,6 +405,15 @@ body {
 	margin: 6px 0;
 }
 
+/* 완료 파일: 진행 중 카드처럼 파일크기·소요시간을 한 줄로 압축 */
+.file-item.completed .completed-info {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 18px;
+	padding: 6px 10px;
+	margin: 0;
+}
+
 .empty-state {
 	text-align: center;
 	padding: 60px 20px;

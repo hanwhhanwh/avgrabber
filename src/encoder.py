@@ -14,6 +14,7 @@ import json
 import platform
 import re
 import subprocess
+import time
 import traceback
 import argparse
 
@@ -159,11 +160,29 @@ class VideoEncoder:
 		return False
 
 
-	def find_subtitle(self, video_file: Path) -> Optional[Path]:
-		"""비디오 파일명과 일치하는 자막 파일(.srt)을 자막 디렉토리에서 찾습니다.
+	def _get_subtitle_candidates(self) -> List[Path]:
+		"""자막 디렉토리의 지원 자막 파일을 확장자 우선순위 순으로 반환합니다.
 
-		파일명에서 시리즈 코드(예: ABC-12345)를 추출하여 같은 코드로 시작하는
-		srt 파일을 검색합니다.
+		Returns:
+			List[Path]: 지원 확장자(.srt/.ass/.ssa/.vtt/.smi) 자막 파일 목록
+		"""
+		if (not self.subtitle_dir.exists()):
+			return []
+
+		extensions = ConfigDef.SUBTITLE_EXTENSIONS
+		candidates = [
+			subtitle_file for subtitle_file in self.subtitle_dir.iterdir()
+			if ((subtitle_file.is_file()) and (subtitle_file.suffix.lower() in extensions))
+		]
+		return sorted(candidates, key=lambda f: (extensions.index(f.suffix.lower()), f.name.lower()))
+
+
+	def find_subtitle(self, video_file: Path) -> Optional[Path]:
+		"""비디오 파일과 짝이 되는 자막 파일을 자막 디렉토리에서 찾습니다.
+
+		파일명 stem 이 같으면 가장 우선하고, 시리즈 코드(예: ABC-12345)가 같거나
+		한쪽 파일명이 다른 쪽으로 시작하면 같은 작품의 자막으로 인정합니다.
+		따라서 시리즈 코드 형식이 아닌 파일명이나 .srt 가 아닌 자막도 포함됩니다.
 
 		Args:
 			video_file (Path): 비디오 파일 경로
@@ -171,21 +190,51 @@ class VideoEncoder:
 		Returns:
 			Optional[Path]: 일치하는 자막 파일 경로 또는 None
 		"""
-		pattern = re.compile(r'^([A-Z]{3,5}-\d{2,5})')
+		candidates = self._get_subtitle_candidates()
+		if (not candidates):
+			return None
+
+		stem = video_file.stem.lower()
+		pattern = re.compile(r'^([A-Z]{3,5}-\d{2,5})', re.IGNORECASE)
 		match = pattern.match(video_file.stem)
+		series_code = match.group(1).lower() if (match) else None
 
-		if (not match):
-			return None
+		best: Optional[Path] = None
+		best_score = 0
+		for candidate in candidates:
+			candidate_stem = candidate.stem.lower()
 
-		if (not self.subtitle_dir.exists()):
-			return None
+			if (candidate_stem == stem):
+				score = 4	# 파일명 완전 일치
+			elif ((series_code is not None) and (candidate_stem.startswith(series_code))):
+				score = 3	# 시리즈 코드 일치
+			else:
+				short_stem, long_stem = sorted((candidate_stem, stem), key=len)
+				if ((ConfigDef.MIN_SUBTITLE_STEM_LENGTH <= len(short_stem)) and (long_stem.startswith(short_stem))):
+					score = 2	# 형식이 달라도 파일명 접두사 일치
+				else:
+					score = 0
 
-		base_name = match.group(1)
+			if (best_score < score):
+				best = candidate
+				best_score = score
 
-		for srt_file in self.subtitle_dir.glob(f"{base_name}*.srt"):
-			return srt_file
+		return best
 
-		return None
+
+	def has_subtitle_marker(self, input_file: Path) -> bool:
+		"""입력 파일명이 출력 형식을 따르면서 자막 접미사 -S를 포함하는지 확인합니다.
+
+		예: ABC-123-S.mp4, ABC-123-FHD-S.mp4, ABC-123-HU-S.mp4
+
+		Args:
+			input_file (Path): 입력 파일 경로
+
+		Returns:
+			bool: 시리즈 코드 뒤에 선택적 화질 접미사와 -S가 붙은 이름이면 True
+		"""
+		pattern = re.compile(r'^[A-Z]{3,5}-\d{2,5}(?:-(?:FH[DU]|H[DU]|S[DU]))?-S$')
+		return bool(pattern.match(input_file.stem))
 
 
 	def generate_output_filename(self, input_file: Path, video_info: VideoInfo
@@ -197,7 +246,7 @@ class VideoEncoder:
 		파일명 규칙:
 			- {시리즈코드}-{화질접미사}{자막접미사}.mp4
 			- 화질접미사: FHD-U / HD-U / SD-U (무수정), FHD-D / HD-D / SD-D (일반)
-			- 자막접미사: 자막 존재 시 -S 추가
+			- 자막접미사: 자막이 있거나 입력 파일명이 ...-S.mp4 형식이면 -S 추가
 
 		Args:
 			input_file (Path): 입력 파일 경로
@@ -226,7 +275,8 @@ class VideoEncoder:
 		else:
 			quality_suffix = f"-S{quality_char}"
 
-		subtitle_suffix = "-S" if subtitle_file else ""
+		keep_subtitle_marker = (subtitle_file is not None) or self.has_subtitle_marker(input_file)
+		subtitle_suffix = "-S" if (keep_subtitle_marker) else ""
 
 		return f"{base_name}{quality_suffix}{subtitle_suffix}.mp4"
 
@@ -330,11 +380,44 @@ class VideoEncoder:
 			self.current_file_index = self.files.index(current)
 
 
+	def _refresh_pending_subtitles(self) -> bool:
+		"""아직 인코딩을 마치지 않은 파일의 자막·출력 파일명을 다시 계산합니다.
+
+		새로고침 시점에 자막이 새로 추가되었거나 삭제된 경우를 반영합니다.
+		완료·진행 중인 파일은 이미 사용한 자막이므로 건드리지 않습니다.
+
+		Returns:
+			bool: 자막 정보가 바뀐 파일이 있으면 True
+		"""
+		changed = False
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.IN_PROGRESS, FileStatus.COMPLETED)):
+				continue
+
+			subtitle_file = self.find_subtitle(self.input_dir / file_info.filename)
+			subtitle_path = str(subtitle_file) if (subtitle_file is not None) else None
+			if (subtitle_path == file_info.subtitle_file):
+				continue
+
+			file_info.subtitle_file = subtitle_path
+			file_info.output_filename = self.generate_output_filename(
+				self.input_dir / file_info.filename,
+				file_info.video_info,
+				subtitle_path,
+				file_info.resolution_mode,
+				use_uncensored=self.check_uncensored_pattern(file_info.filename)
+			)
+			changed = True
+		return changed
+
+
 	async def refresh_files(self, websocket_manager: WebSocketManager) -> Optional[Dict[str, int]]:
 		"""
 		입력 디렉토리를 다시 읽어 파일 목록을 갱신합니다.
 		삭제된 파일은 목록에서 제거하고(인코딩 중인 파일 제외), 신규 파일은 목록 끝에
 		하나씩 추가하며 추가할 때마다 전체 상태를 브로드캐스트합니다.
+		인코딩 전이거나 재시도할 파일은 자막이 새로 생기거나 사라진 경우
+		자막·출력 파일명을 갱신합니다.
 
 		Args:
 			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
@@ -355,7 +438,9 @@ class VideoEncoder:
 			self.files = [f for f in self.files if ((f.filename in video_names) or (f is current))]
 			removed = count_before - len(self.files)
 			self._sync_current_index(current)
-			if (0 < removed):
+
+			subtitles_changed = self._refresh_pending_subtitles()
+			if ((0 < removed) or (subtitles_changed)):
 				await websocket_manager.broadcast_all_status(self.get_all_status())
 
 			added = 0
@@ -657,6 +742,38 @@ class VideoEncoder:
 		return True
 
 
+	def _copy_subtitle(self, file_info: FileInfo) -> None:
+		"""인코딩 완료 후 자막 파일을 출력 디렉토리로 복사합니다.
+
+		출력 자막 파일명은 출력 영상의 stem 에 원본 자막 확장자를 붙여 만듭니다.
+
+		Args:
+			file_info (FileInfo): 완료된 파일 정보
+		"""
+		if ((not file_info.subtitle_file) or (not path.exists(file_info.subtitle_file))):
+			return
+
+		subtitle_source = Path(file_info.subtitle_file)
+		output_subtitle = self.output_dir / f"{Path(file_info.output_filename).stem}{subtitle_source.suffix.lower()}"
+		copy2(str(subtitle_source), str(output_subtitle))
+
+
+	def _finalize_completion(self, file_info: FileInfo, started_at: float) -> None:
+		"""인코딩 성공 후 상태·출력 파일 크기·소요 시간을 기록하고 자막을 복사합니다.
+
+		Args:
+			file_info (FileInfo): 완료된 파일 정보
+			started_at (float): 인코딩 시작 시각 (time.monotonic 기준)
+		"""
+		file_info.status = FileStatus.COMPLETED
+		file_info.progress.progress_percent = 100.0
+		file_info.elapsed_seconds = time.monotonic() - started_at
+
+		output_file = self.output_dir / file_info.output_filename
+		file_info.output_size = output_file.stat().st_size if (output_file.exists()) else 0
+		self._copy_subtitle(file_info)
+
+
 	async def encode_file(self, file_info: FileInfo, websocket_manager: WebSocketManager) -> bool:
 		"""단일 비디오 파일을 FFmpeg로 인코딩합니다.
 		진행률을 파싱하여 WebSocket으로 실시간 브로드캐스트하고 로그 파일에 기록합니다.
@@ -673,6 +790,7 @@ class VideoEncoder:
 
 		file_info.status = FileStatus.IN_PROGRESS
 		self.stop_current = False
+		started_at = time.monotonic()
 		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 		cmd = self.build_ffmpeg_command(file_info)
@@ -739,10 +857,7 @@ class VideoEncoder:
 				await self.current_process.wait()
 
 				if (self.current_process.returncode == 0):
-					file_info.status = FileStatus.COMPLETED
-					file_info.progress.progress_percent = 100.0
-					if ((file_info.subtitle_file) and path.exists(file_info.subtitle_file)):
-						copy2(str(file_info.subtitle_file), str(self.output_dir / (file_info.output_filename).replace('.mp4', '.srt')))
+					self._finalize_completion(file_info, started_at)
 					return True
 				else:
 					file_info.status = FileStatus.FAILED
@@ -843,6 +958,8 @@ class VideoEncoder:
 			if (file_info.status in (FileStatus.STOPPED, FileStatus.FAILED)):
 				file_info.status = FileStatus.PENDING
 				file_info.progress = ProgressInfo()
+				file_info.output_size = 0
+				file_info.elapsed_seconds = 0.0
 		await websocket_manager.broadcast_all_status(self.get_all_status())
 
 		while (not self.stop_all):

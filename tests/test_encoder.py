@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import asyncio
 import sys
+import time
 
 import pytest
 
@@ -17,7 +18,9 @@ if (_project_root not in sys.path):
 	sys.path.insert(0, _project_root)
 
 from src.encoder import VideoEncoder
-from src.models import ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection, VideoCodec
+from src.models import (
+	ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection, ResolutionMode, VideoCodec, VideoInfo
+)
 
 
 class StubConfig:
@@ -358,6 +361,229 @@ def test_progress_falls_back_to_time_without_fps(tmp_path: Path):
 
 	make_encoder(tmp_path).parse_progress(line, file_info)
 	assert file_info.progress.progress_percent == pytest.approx(25.0)
+
+
+def make_subtitle_encoder(tmp_path: Path) -> VideoEncoder:
+	"""
+	자막 디렉토리가 준비된 테스트용 인코더를 만듭니다.
+
+	Args:
+		tmp_path (Path): 입력·자막 디렉토리로 쓸 임시 경로
+
+	Returns:
+		VideoEncoder: 테스트용 인코더
+	"""
+	encoder = make_encoder(tmp_path)
+	encoder.subtitle_dir.mkdir()
+	return encoder
+
+
+def test_find_subtitle_matches_stem_without_series_code(tmp_path: Path):
+	"""시리즈 코드 형식이 아닌 파일명도 stem 이 같으면 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "my movie.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == subtitle
+
+
+@pytest.mark.parametrize("extension", [".srt", ".ass", ".ssa", ".vtt", ".smi"])
+def test_find_subtitle_supports_other_extensions(tmp_path: Path, extension: str):
+	"""자막 확장자가 .srt 가 아니어도 같은 파일명의 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / f"my movie{extension}"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == subtitle
+
+
+def test_find_subtitle_prefers_srt_by_extension_order(tmp_path: Path):
+	"""같은 stem 의 자막이 여러 개면 확장자 우선순위(.srt)가 높은 파일을 고른다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	(encoder.subtitle_dir / "my movie.ass").write_text("", encoding="utf-8")
+	srt_subtitle = encoder.subtitle_dir / "my movie.srt"
+	srt_subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == srt_subtitle
+
+
+def test_find_subtitle_matches_series_code_prefix(tmp_path: Path):
+	"""파일명 뒤에 화질 표기가 붙어도 시리즈 코드가 같으면 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "ABC-123 1080p.mp4") == subtitle
+
+
+def test_find_subtitle_matches_stem_prefix(tmp_path: Path):
+	"""형식이 달라도 한쪽 파일명이 다른 쪽으로 시작하면 자막으로 인정한다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "my movie.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie 1080p.mp4") == subtitle
+
+
+def test_find_subtitle_ignores_too_short_prefix(tmp_path: Path):
+	"""접두사가 너무 짧으면 다른 작품의 자막을 잘못 붙이지 않는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	(encoder.subtitle_dir / "a.srt").write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "abc.mp4") is None
+
+
+def test_refresh_updates_pending_subtitle_and_output_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""새로고침 시 인코딩 전 파일에 새 자막이 생기면 자막과 -S 출력 파일명을 반영한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4")]
+	encoder.files[0].output_filename = "ABC-123-SD-D.mp4"
+	encoder.subtitle_dir.mkdir()
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+	ws = AsyncMock()
+
+	asyncio.run(encoder.refresh_files(ws))
+
+	assert encoder.files[0].subtitle_file == str(subtitle)
+	assert encoder.files[0].output_filename == "ABC-123-SD-S.mp4"
+	assert ws.broadcast_all_status.await_count == 1
+
+
+@pytest.mark.parametrize("status", [FileStatus.STOPPED, FileStatus.FAILED])
+def test_refresh_updates_retry_target_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: FileStatus):
+	"""중단·실패 후 재시도할 파일도 새로고침으로 자막을 반영한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4", status)]
+	encoder.subtitle_dir.mkdir()
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert encoder.files[0].subtitle_file == str(subtitle)
+	assert encoder.files[0].output_filename == "ABC-123-SD-S.mp4"
+
+
+def test_refresh_removes_disappeared_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""새로고침 시 자막 파일이 사라졌으면 자막 정보와 -S 출력 파일명을 제거한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4")]
+	encoder.files[0].subtitle_file = str(tmp_path / "subs" / "ABC-123.srt")
+	encoder.files[0].output_filename = "ABC-123-SD-S.mp4"
+	encoder.subtitle_dir.mkdir()
+
+	asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert encoder.files[0].subtitle_file is None
+	assert encoder.files[0].output_filename == "ABC-123-SD.mp4"
+
+
+def test_refresh_does_not_touch_completed_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""완료된 파일은 새로고침으로 자막·출력 파일명을 바꾸지 않는다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4", FileStatus.COMPLETED)]
+	encoder.files[0].output_filename = "ABC-123-SD-D.mp4"
+	encoder.subtitle_dir.mkdir()
+	(encoder.subtitle_dir / "ABC-123.srt").write_text("", encoding="utf-8")
+	ws = AsyncMock()
+
+	asyncio.run(encoder.refresh_files(ws))
+
+	assert encoder.files[0].subtitle_file is None
+	assert encoder.files[0].output_filename == "ABC-123-SD-D.mp4"
+	assert ws.broadcast_all_status.await_count == 0
+
+
+@pytest.mark.parametrize("filename", [
+	"ABC-123-S.mp4",
+	"ABC-123-FHD-S.mp4",
+	"ABC-123-HU-S.mp4",
+])
+def test_output_filename_keeps_subtitle_marker_without_subtitle(tmp_path: Path, filename: str):
+	"""입력 파일명이 ...-S 형식이면 자막 파일이 없어도 -S를 유지한다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / filename, VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD-S.mp4"
+
+
+def test_output_filename_keeps_subtitle_marker_in_encoded_name(tmp_path: Path):
+	"""이미 완성된 출력 형식(...-FHD-S)을 다시 넣어도 같은 이름이 나온다."""
+	encoder = make_encoder(tmp_path)
+	video_info = VideoInfo()
+	video_info.pixel_count = ConfigDef.HD_THRESHOLD
+
+	output = encoder.generate_output_filename(
+		tmp_path / "ABC-123-FHD-S.mp4", video_info, None, ResolutionMode.FHD
+	)
+
+	assert output == "ABC-123-FHD-S.mp4"
+
+
+def test_output_filename_without_marker_or_subtitle_has_no_s(tmp_path: Path):
+	"""입력 파일명에 -S가 없고 자막도 없으면 -S를 붙이지 않는다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / "ABC-123.mp4", VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD.mp4"
+
+
+def test_output_filename_ignores_unrelated_s_suffix(tmp_path: Path):
+	"""출력 형식이 아닌 -S로 끝나는 이름에는 -S를 덧붙이지 않는다."""
+	encoder = make_encoder(tmp_path)
+
+	output = encoder.generate_output_filename(tmp_path / "ABC-123-SPECIAL.mp4", VideoInfo(), None, ResolutionMode.HD)
+
+	assert output == "ABC-123-SD.mp4"
+
+
+def test_output_filename_keeps_s_with_uncensored_marker(tmp_path: Path):
+	"""무수정 파일명(...-FHU-S)도 자막이 없으면 -S를 유지한다."""
+	encoder = make_encoder(tmp_path)
+	input_file = tmp_path / "ABC-123-FHU-S.mp4"
+
+	output = encoder.generate_output_filename(
+		input_file,
+		VideoInfo(),
+		None,
+		ResolutionMode.HD,
+		use_uncensored=encoder.check_uncensored_pattern(input_file.name)
+	)
+
+	assert output == "ABC-123-SU-S.mp4"
+
+
+def test_finalize_completion_records_size_and_elapsed(tmp_path: Path):
+	"""인코딩 완료 시 출력 파일 크기와 소요 시간을 기록한다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("ABC-123.mp4")
+	file_info.output_filename = "ABC-123-SD-D.mp4"
+	(tmp_path / file_info.output_filename).write_bytes(b"x" * 2048)
+
+	encoder._finalize_completion(file_info, time.monotonic() - 2.0)
+
+	assert file_info.status == FileStatus.COMPLETED
+	assert file_info.progress.progress_percent == 100.0
+	assert file_info.output_size == 2048
+	assert file_info.elapsed_seconds >= 2.0
+
+
+def test_finalize_completion_copies_subtitle_with_original_extension(tmp_path: Path):
+	"""완료 시 자막을 원본 확장자 그대로 출력 디렉토리에 복사한다."""
+	encoder = make_encoder(tmp_path)
+	subtitle = tmp_path / "ABC-123.ass"
+	subtitle.write_text("", encoding="utf-8")
+	file_info = FileInfo("ABC-123.mp4")
+	file_info.output_filename = "ABC-123-SD-D-S.mp4"
+	file_info.subtitle_file = str(subtitle)
+	(tmp_path / file_info.output_filename).write_bytes(b"x")
+
+	encoder._finalize_completion(file_info, time.monotonic())
+
+	assert (tmp_path / "ABC-123-SD-D-S.ass").exists()
 
 
 if __name__ == "__main__":
