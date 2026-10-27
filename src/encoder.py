@@ -222,6 +222,21 @@ class VideoEncoder:
 		return best
 
 
+	def has_subtitle_marker(self, input_file: Path) -> bool:
+		"""입력 파일명이 출력 형식을 따르면서 자막 접미사 -S를 포함하는지 확인합니다.
+
+		예: ABC-123-S.mp4, ABC-123-FHD-S.mp4, ABC-123-HU-S.mp4
+
+		Args:
+			input_file (Path): 입력 파일 경로
+
+		Returns:
+			bool: 시리즈 코드 뒤에 선택적 화질 접미사와 -S가 붙은 이름이면 True
+		"""
+		pattern = re.compile(r'^[A-Z]{3,5}-\d{2,5}(?:-(?:FH[DU]|H[DU]|S[DU]))?-S$')
+		return bool(pattern.match(input_file.stem))
+
+
 	def generate_output_filename(self, input_file: Path, video_info: VideoInfo
 							, subtitle_file: Optional[Path]
 							, resolution_mode: ResolutionMode
@@ -231,7 +246,7 @@ class VideoEncoder:
 		파일명 규칙:
 			- {시리즈코드}-{화질접미사}{자막접미사}.mp4
 			- 화질접미사: FHD-U / HD-U / SD-U (무수정), FHD-D / HD-D / SD-D (일반)
-			- 자막접미사: 자막 존재 시 -S 추가
+			- 자막접미사: 자막이 있거나 입력 파일명이 ...-S.mp4 형식이면 -S 추가
 
 		Args:
 			input_file (Path): 입력 파일 경로
@@ -260,7 +275,8 @@ class VideoEncoder:
 		else:
 			quality_suffix = f"-S{quality_char}"
 
-		subtitle_suffix = "-S" if subtitle_file else ""
+		keep_subtitle_marker = (subtitle_file is not None) or self.has_subtitle_marker(input_file)
+		subtitle_suffix = "-S" if (keep_subtitle_marker) else ""
 
 		return f"{base_name}{quality_suffix}{subtitle_suffix}.mp4"
 
