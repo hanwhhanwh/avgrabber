@@ -360,6 +360,76 @@ def test_progress_falls_back_to_time_without_fps(tmp_path: Path):
 	assert file_info.progress.progress_percent == pytest.approx(25.0)
 
 
+def make_subtitle_encoder(tmp_path: Path) -> VideoEncoder:
+	"""
+	자막 디렉토리가 준비된 테스트용 인코더를 만듭니다.
+
+	Args:
+		tmp_path (Path): 입력·자막 디렉토리로 쓸 임시 경로
+
+	Returns:
+		VideoEncoder: 테스트용 인코더
+	"""
+	encoder = make_encoder(tmp_path)
+	encoder.subtitle_dir.mkdir()
+	return encoder
+
+
+def test_find_subtitle_matches_stem_without_series_code(tmp_path: Path):
+	"""시리즈 코드 형식이 아닌 파일명도 stem 이 같으면 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "my movie.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == subtitle
+
+
+@pytest.mark.parametrize("extension", [".srt", ".ass", ".ssa", ".vtt", ".smi"])
+def test_find_subtitle_supports_other_extensions(tmp_path: Path, extension: str):
+	"""자막 확장자가 .srt 가 아니어도 같은 파일명의 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / f"my movie{extension}"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == subtitle
+
+
+def test_find_subtitle_prefers_srt_by_extension_order(tmp_path: Path):
+	"""같은 stem 의 자막이 여러 개면 확장자 우선순위(.srt)가 높은 파일을 고른다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	(encoder.subtitle_dir / "my movie.ass").write_text("", encoding="utf-8")
+	srt_subtitle = encoder.subtitle_dir / "my movie.srt"
+	srt_subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie.mp4") == srt_subtitle
+
+
+def test_find_subtitle_matches_series_code_prefix(tmp_path: Path):
+	"""파일명 뒤에 화질 표기가 붙어도 시리즈 코드가 같으면 자막을 찾는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "ABC-123 1080p.mp4") == subtitle
+
+
+def test_find_subtitle_matches_stem_prefix(tmp_path: Path):
+	"""형식이 달라도 한쪽 파일명이 다른 쪽으로 시작하면 자막으로 인정한다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	subtitle = encoder.subtitle_dir / "my movie.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "my movie 1080p.mp4") == subtitle
+
+
+def test_find_subtitle_ignores_too_short_prefix(tmp_path: Path):
+	"""접두사가 너무 짧으면 다른 작품의 자막을 잘못 붙이지 않는다."""
+	encoder = make_subtitle_encoder(tmp_path)
+	(encoder.subtitle_dir / "a.srt").write_text("", encoding="utf-8")
+
+	assert encoder.find_subtitle(tmp_path / "abc.mp4") is None
+
+
 def test_refresh_updates_pending_subtitle_and_output_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 	"""새로고침 시 인코딩 전 파일에 새 자막이 생기면 자막과 -S 출력 파일명을 반영한다."""
 	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
