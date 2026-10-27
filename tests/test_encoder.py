@@ -360,5 +360,67 @@ def test_progress_falls_back_to_time_without_fps(tmp_path: Path):
 	assert file_info.progress.progress_percent == pytest.approx(25.0)
 
 
+def test_refresh_updates_pending_subtitle_and_output_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""새로고침 시 인코딩 전 파일에 새 자막이 생기면 자막과 -S 출력 파일명을 반영한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4")]
+	encoder.files[0].output_filename = "ABC-123-SD-D.mp4"
+	encoder.subtitle_dir.mkdir()
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+	ws = AsyncMock()
+
+	asyncio.run(encoder.refresh_files(ws))
+
+	assert encoder.files[0].subtitle_file == str(subtitle)
+	assert encoder.files[0].output_filename == "ABC-123-SD-S.mp4"
+	assert ws.broadcast_all_status.await_count == 1
+
+
+@pytest.mark.parametrize("status", [FileStatus.STOPPED, FileStatus.FAILED])
+def test_refresh_updates_retry_target_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: FileStatus):
+	"""중단·실패 후 재시도할 파일도 새로고침으로 자막을 반영한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4", status)]
+	encoder.subtitle_dir.mkdir()
+	subtitle = encoder.subtitle_dir / "ABC-123.srt"
+	subtitle.write_text("", encoding="utf-8")
+
+	asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert encoder.files[0].subtitle_file == str(subtitle)
+	assert encoder.files[0].output_filename == "ABC-123-SD-S.mp4"
+
+
+def test_refresh_removes_disappeared_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""새로고침 시 자막 파일이 사라졌으면 자막 정보와 -S 출력 파일명을 제거한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4")]
+	encoder.files[0].subtitle_file = str(tmp_path / "subs" / "ABC-123.srt")
+	encoder.files[0].output_filename = "ABC-123-SD-S.mp4"
+	encoder.subtitle_dir.mkdir()
+
+	asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert encoder.files[0].subtitle_file is None
+	assert encoder.files[0].output_filename == "ABC-123-SD.mp4"
+
+
+def test_refresh_does_not_touch_completed_subtitle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""완료된 파일은 새로고침으로 자막·출력 파일명을 바꾸지 않는다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, ["ABC-123.mp4"])
+	encoder.files = [FileInfo("ABC-123.mp4", FileStatus.COMPLETED)]
+	encoder.files[0].output_filename = "ABC-123-SD-D.mp4"
+	encoder.subtitle_dir.mkdir()
+	(encoder.subtitle_dir / "ABC-123.srt").write_text("", encoding="utf-8")
+	ws = AsyncMock()
+
+	asyncio.run(encoder.refresh_files(ws))
+
+	assert encoder.files[0].subtitle_file is None
+	assert encoder.files[0].output_filename == "ABC-123-SD-D.mp4"
+	assert ws.broadcast_all_status.await_count == 0
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v"])
