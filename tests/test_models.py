@@ -401,6 +401,12 @@ class TestFileInfo:
         info.subtitle_file = "test.vtt"
         assert info.subtitle_file == "test.vtt"
 
+    def test_initial_output_size_and_elapsed_are_zero(self):
+        """완료 정보(출력 크기·소요 시간)는 0으로 초기화된다."""
+        info = FileInfo("test_video.mp4")
+        assert info.output_size == 0
+        assert info.elapsed_seconds == 0.0
+
 # =========================================================
 # Section 8: FileInfo.to_dict() 테스트 (4 items)
 # =========================================================
@@ -426,6 +432,8 @@ class TestFileInfoToDict:
         assert "subtitle" in result
         assert "scale" in result
         assert "resolution_mode" in result
+        assert "output_size" in result
+        assert "elapsed_seconds" in result
 
     def test_to_dict_progress_structure(self):
         """to_dict() progress 구조 확인."""

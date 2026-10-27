@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import asyncio
 import sys
+import time
 
 import pytest
 
@@ -490,6 +491,36 @@ def test_refresh_does_not_touch_completed_subtitle(tmp_path: Path, monkeypatch: 
 	assert encoder.files[0].subtitle_file is None
 	assert encoder.files[0].output_filename == "ABC-123-SD-D.mp4"
 	assert ws.broadcast_all_status.await_count == 0
+
+
+def test_finalize_completion_records_size_and_elapsed(tmp_path: Path):
+	"""인코딩 완료 시 출력 파일 크기와 소요 시간을 기록한다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("ABC-123.mp4")
+	file_info.output_filename = "ABC-123-SD-D.mp4"
+	(tmp_path / file_info.output_filename).write_bytes(b"x" * 2048)
+
+	encoder._finalize_completion(file_info, time.monotonic() - 2.0)
+
+	assert file_info.status == FileStatus.COMPLETED
+	assert file_info.progress.progress_percent == 100.0
+	assert file_info.output_size == 2048
+	assert file_info.elapsed_seconds >= 2.0
+
+
+def test_finalize_completion_copies_subtitle_with_original_extension(tmp_path: Path):
+	"""완료 시 자막을 원본 확장자 그대로 출력 디렉토리에 복사한다."""
+	encoder = make_encoder(tmp_path)
+	subtitle = tmp_path / "ABC-123.ass"
+	subtitle.write_text("", encoding="utf-8")
+	file_info = FileInfo("ABC-123.mp4")
+	file_info.output_filename = "ABC-123-SD-D-S.mp4"
+	file_info.subtitle_file = str(subtitle)
+	(tmp_path / file_info.output_filename).write_bytes(b"x")
+
+	encoder._finalize_completion(file_info, time.monotonic())
+
+	assert (tmp_path / "ABC-123-SD-D-S.ass").exists()
 
 
 if __name__ == "__main__":
