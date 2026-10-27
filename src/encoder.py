@@ -14,6 +14,7 @@ import json
 import platform
 import re
 import subprocess
+import time
 import traceback
 import argparse
 
@@ -741,6 +742,22 @@ class VideoEncoder:
 		copy2(str(subtitle_source), str(output_subtitle))
 
 
+	def _finalize_completion(self, file_info: FileInfo, started_at: float) -> None:
+		"""인코딩 성공 후 상태·출력 파일 크기·소요 시간을 기록하고 자막을 복사합니다.
+
+		Args:
+			file_info (FileInfo): 완료된 파일 정보
+			started_at (float): 인코딩 시작 시각 (time.monotonic 기준)
+		"""
+		file_info.status = FileStatus.COMPLETED
+		file_info.progress.progress_percent = 100.0
+		file_info.elapsed_seconds = time.monotonic() - started_at
+
+		output_file = self.output_dir / file_info.output_filename
+		file_info.output_size = output_file.stat().st_size if (output_file.exists()) else 0
+		self._copy_subtitle(file_info)
+
+
 	async def encode_file(self, file_info: FileInfo, websocket_manager: WebSocketManager) -> bool:
 		"""단일 비디오 파일을 FFmpeg로 인코딩합니다.
 		진행률을 파싱하여 WebSocket으로 실시간 브로드캐스트하고 로그 파일에 기록합니다.
@@ -757,6 +774,7 @@ class VideoEncoder:
 
 		file_info.status = FileStatus.IN_PROGRESS
 		self.stop_current = False
+		started_at = time.monotonic()
 		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 		cmd = self.build_ffmpeg_command(file_info)
@@ -823,9 +841,7 @@ class VideoEncoder:
 				await self.current_process.wait()
 
 				if (self.current_process.returncode == 0):
-					file_info.status = FileStatus.COMPLETED
-					file_info.progress.progress_percent = 100.0
-					self._copy_subtitle(file_info)
+					self._finalize_completion(file_info, started_at)
 					return True
 				else:
 					file_info.status = FileStatus.FAILED
@@ -926,6 +942,8 @@ class VideoEncoder:
 			if (file_info.status in (FileStatus.STOPPED, FileStatus.FAILED)):
 				file_info.status = FileStatus.PENDING
 				file_info.progress = ProgressInfo()
+				file_info.output_size = 0
+				file_info.elapsed_seconds = 0.0
 		await websocket_manager.broadcast_all_status(self.get_all_status())
 
 		while (not self.stop_all):

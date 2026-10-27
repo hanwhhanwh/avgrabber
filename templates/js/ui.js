@@ -87,16 +87,14 @@ function updateCurrentFile(data) {
 
 function updateFileElement(element, file) {
 	element.className = `file-item ${file.status}`;
-	
+
 	const statusBadge = element.querySelector('.status-badge');
 	if (statusBadge) {
 		statusBadge.className = `status-badge status-${file.status}`;
 		statusBadge.textContent = file.status;
 	}
-	
+
 	let progressBarHtml = '';
-	let progressInfoHtml = '';
-	
 	if (file.status === 'in_progress' && file.progress) {
 		progressBarHtml = `
 			<div class="progress-bar-container">
@@ -105,7 +103,39 @@ function updateFileElement(element, file) {
 				</div>
 			</div>
 		`;
-		progressInfoHtml = `
+	}
+
+	const progressInfoHtml = buildProgressInfoHtml(file);
+	const existingVideoInfo = element.querySelector('.video-info');
+	const existingProgressBar = element.querySelector('.progress-bar-container');
+	const existingProgressInfo = element.querySelector('.progress-info');
+
+	if (existingProgressBar) {
+		existingProgressBar.remove();
+	}
+	if (existingProgressInfo) {
+		existingProgressInfo.remove();
+	}
+
+	if (progressBarHtml) {
+		if (existingVideoInfo) {
+			existingVideoInfo.insertAdjacentHTML('afterend', progressBarHtml);
+		}
+	}
+
+	if (progressInfoHtml) {
+		const anchor = element.querySelector('.progress-bar-container') || existingVideoInfo;
+		if (anchor) {
+			anchor.insertAdjacentHTML('afterend', progressInfoHtml);
+		}
+	}
+}
+
+
+// 진행 중 파일은 Frame/FPS/Size/Time/Bitrate/Speed 를, 완료 파일은 파일크기·소요시간 요약을 표시한다.
+function buildProgressInfoHtml(file) {
+	if (file.status === 'in_progress' && file.progress) {
+		return `
 			<div class="progress-info">
 				<div class="progress-item">
 					<span class="progress-label">Frame:</span> ${file.progress.frame}
@@ -128,30 +158,21 @@ function updateFileElement(element, file) {
 			</div>
 		`;
 	}
-	
-	const existingVideoInfo = element.querySelector('.video-info');
-	const existingProgressBar = element.querySelector('.progress-bar-container');
-	const existingProgressInfo = element.querySelector('.progress-info');
-	
-	if (existingProgressBar) {
-		existingProgressBar.remove();
+
+	if (file.status === 'completed') {
+		return `
+			<div class="progress-info completed-info">
+				<div class="progress-item">
+					<span class="progress-label">파일크기:</span> ${formatFileSize(file.output_size)}
+				</div>
+				<div class="progress-item">
+					<span class="progress-label">소요시간:</span> ${formatDuration(file.elapsed_seconds)}
+				</div>
+			</div>
+		`;
 	}
-	if (existingProgressInfo) {
-		existingProgressInfo.remove();
-	}
-	
-	if (progressBarHtml) {
-		if (existingVideoInfo) {
-			existingVideoInfo.insertAdjacentHTML('afterend', progressBarHtml);
-		}
-	}
-	
-	if (progressInfoHtml) {
-		const newProgressBar = element.querySelector('.progress-bar-container');
-		if (newProgressBar) {
-			newProgressBar.insertAdjacentHTML('afterend', progressInfoHtml);
-		}
-	}
+
+	return '';
 }
 
 
@@ -238,7 +259,6 @@ function updateFileList(data) {
 		}
 		
 		let progressBarHtml = '';
-		let progressInfoHtml = '';
 		if (file.status === 'in_progress' && file.progress) {
 			progressBarHtml = `
 				<div class="progress-bar-container">
@@ -247,29 +267,8 @@ function updateFileList(data) {
 					</div>
 				</div>
 			`;
-			progressInfoHtml = `
-				<div class="progress-info">
-					<div class="progress-item">
-						<span class="progress-label">Frame:</span> ${file.progress.frame}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">FPS:</span> ${file.progress.fps}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Size:</span> ${file.progress.size}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Time:</span> ${formatTimeWithEta(file)}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
-					</div>
-					<div class="progress-item">
-						<span class="progress-label">Speed:</span> ${file.progress.speed}
-					</div>
-				</div>
-			`;
 		}
+		const progressInfoHtml = buildProgressInfoHtml(file);
 		
 		html += `
 			<div class="file-item ${itemClass}">
@@ -309,6 +308,20 @@ function formatDuration(seconds) {
 	const m = Math.floor((seconds % 3600) / 60);
 	const s = Math.floor(seconds % 60);
 	return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+
+// 바이트 단위 파일 크기를 읽기 쉬운 단위로 변환한다.
+function formatFileSize(bytes) {
+	if (!bytes || bytes <= 0) return '-';
+	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+	let value = bytes;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit++;
+	}
+	return `${value.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
 }
 
 

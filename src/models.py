@@ -140,6 +140,8 @@ class FileInfo:
         self.subtitle_file: Optional[str] = None
         self.scale_filter: Optional[str] = None
         self.resolution_mode: ResolutionMode = ResolutionMode.HD
+        self.output_size: int = 0
+        self.elapsed_seconds: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """파일 정보를 JSON 직렬화 가능한 딕셔너리로 변환합니다.
@@ -169,7 +171,9 @@ class FileInfo:
             },
             "subtitle": str(self.subtitle_file) if (self.subtitle_file) else None,
             "scale": self.scale_filter,
-            "resolution_mode": self.resolution_mode.value
+            "resolution_mode": self.resolution_mode.value,
+            "output_size": self.output_size,
+            "elapsed_seconds": round(self.elapsed_seconds, 1)
         }
 
 
