@@ -113,9 +113,10 @@ class TestConfigDef:
         assert ConfigDef.DEFAULT_LOG_DIR == "logs"
 
     def test_default_crf_exists(self):
-        """기본 CRF 값 확인 (int 타입)."""
-        assert ConfigDef.DEFAULT_CRF == 27
-        assert isinstance(ConfigDef.DEFAULT_CRF, int)
+        """기본 CRF 값 확인 (None 이면 코덱별 권장값 사용)."""
+        assert ConfigDef.DEFAULT_CRF is None
+        assert ConfigDef.DEFAULT_CRF_SVT_AV1 == 30
+        assert ConfigDef.DEFAULT_CRF_X265 == 27
 
     def test_default_volume_exists(self):
         """기본 Volume 값 확인 (float 타입)."""

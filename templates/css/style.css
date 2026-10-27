@@ -23,17 +23,44 @@ body {
 .header {
 	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 	color: white;
-	padding: 30px;
-	text-align: center;
+	padding: 12px 30px;
+	display: flex;
+	align-items: center;
+	gap: 15px;
 }
 
 .header h1 {
-	font-size: 32px;
-	margin-bottom: 10px;
+	font-size: 22px;
 }
 
 .header p {
 	opacity: 0.9;
+	font-size: 14px;
+}
+
+/* 연결 상태는 헤더 오른쪽 끝에 배지로 표시 */
+.header .connection-status {
+	margin-left: auto;
+	padding: 0;
+}
+
+.header .connection-status span {
+	padding: 4px 12px;
+	border-radius: 12px;
+}
+
+.encode-settings {
+	padding: 10px 30px;
+	background: #f8f9fa;
+	border-bottom: 1px solid #dee2e6;
+	display: flex;
+	gap: 30px;
+	font-size: 14px;
+	color: #333;
+}
+
+.encode-settings:empty {
+	display: none;
 }
 
 .overall-progress {
@@ -192,6 +219,56 @@ body {
 	margin-bottom: 10px;
 }
 
+/* 파일명 오른쪽 영역: 순서 변경 버튼 / 해상도 선택 / 상태 배지 */
+.file-header-right {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.move-buttons {
+	display: none;
+	gap: 5px;
+}
+
+.file-header-right .resolution-selector {
+	margin-top: 0;
+	padding: 2px 8px;
+	gap: 6px;
+	font-size: 13px;
+}
+
+.file-header-right .resolution-selector select {
+	padding: 2px 6px;
+	font-size: 13px;
+}
+
+.file-item.pending:hover .move-buttons {
+	display: flex;
+}
+
+.move-buttons button {
+	padding: 4px 10px;
+	border: 1px solid #667eea;
+	border-radius: 4px;
+	background: white;
+	color: #667eea;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.move-buttons button:hover {
+	background: #667eea;
+	color: white;
+}
+
+.move-buttons button:disabled {
+	border-color: #ccc;
+	background: white;
+	color: #ccc;
+	cursor: not-allowed;
+}
+
 .filename {
 	font-weight: bold;
 	font-size: 16px;
@@ -303,6 +380,29 @@ body {
 .progress-label {
 	font-weight: bold;
 	color: #667eea;
+}
+
+/* 진행 중 파일 카드: 정보 항목을 내용 길이만큼 한 줄로 배치하고 여백을 줄여 높이를 압축 */
+.file-item.in_progress {
+	padding: 12px 20px;
+}
+
+.file-item.in_progress .file-header {
+	margin-bottom: 6px;
+}
+
+.file-item.in_progress .video-info,
+.file-item.in_progress .progress-info {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 18px;
+	padding: 6px 10px;
+	margin: 0;
+}
+
+.file-item.in_progress .progress-bar-container {
+	height: 18px;
+	margin: 6px 0;
 }
 
 .empty-state {

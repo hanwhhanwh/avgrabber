@@ -16,6 +16,7 @@ function connect() {
 		
 		if (data.type === 'full') {
 			filesData = data.files;
+			updateEncodeSettings(data.encode_settings);
 			updateFileList(data);
 			updateOverallProgress(data);
 		} else if (data.type === 'current') {
@@ -42,6 +43,16 @@ function updateConnectionStatus(connected) {
 	} else {
 		status.innerHTML = '<span class="disconnected">✗ 연결 끊김</span>';
 	}
+}
+
+
+function updateEncodeSettings(settings) {
+	if (!settings) return;
+	document.getElementById('encodeSettings').innerHTML = `
+		<span><span class="info-label">코덱:</span> ${settings.codec}</span>
+		<span><span class="info-label">Preset:</span> ${settings.preset}</span>
+		<span><span class="info-label">CRF:</span> ${settings.crf}</span>
+	`;
 }
 
 
@@ -106,7 +117,7 @@ function updateFileElement(element, file) {
 					<span class="progress-label">Size:</span> ${file.progress.size}
 				</div>
 				<div class="progress-item">
-					<span class="progress-label">Time:</span> ${file.progress.time}
+					<span class="progress-label">Time:</span> ${formatTimeWithEta(file)}
 				</div>
 				<div class="progress-item">
 					<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
@@ -160,7 +171,9 @@ function updateFileList(data) {
 	}
 	
 	let html = '';
-	data.files.forEach((file) => {
+	data.files.forEach((file, index) => {
+		// 바로 위가 완료·진행 중 파일이면 위로 이동 불가
+		const canMoveUp = index > 0 && !['completed', 'in_progress'].includes(data.files[index - 1].status);
 		const statusClass = `status-${file.status}`;
 		const itemClass = file.status;
 		
@@ -221,7 +234,6 @@ function updateFileList(data) {
 					</div>
 					` : ''}
 				</div>
-				${resolutionSelector}
 			`;
 		}
 		
@@ -247,7 +259,7 @@ function updateFileList(data) {
 						<span class="progress-label">Size:</span> ${file.progress.size}
 					</div>
 					<div class="progress-item">
-						<span class="progress-label">Time:</span> ${file.progress.time}
+						<span class="progress-label">Time:</span> ${formatTimeWithEta(file)}
 					</div>
 					<div class="progress-item">
 						<span class="progress-label">Bitrate:</span> ${file.progress.bitrate}
@@ -267,7 +279,18 @@ function updateFileList(data) {
 						${file.output_filename && file.output_filename !== file.filename ? 
 							`<span class="output-filename">→ ${file.output_filename}</span>` : ''}
 					</div>
-					<span class="status-badge ${statusClass}">${file.status}</span>
+					<div class="file-header-right">
+						${file.status === 'pending' ? `
+						<div class="move-buttons">
+							<button onclick="moveFile('${file.filename}', 'first')" ${canMoveUp ? '' : 'disabled'}>⏫ 처음으로</button>
+							<button onclick="moveFile('${file.filename}', 'up')" ${canMoveUp ? '' : 'disabled'}>🔼 한칸위</button>
+							<button onclick="moveFile('${file.filename}', 'down')">🔽 한칸아래</button>
+							<button onclick="moveFile('${file.filename}', 'last')">⏬ 마지막으로</button>
+						</div>
+						` : ''}
+						${resolutionSelector}
+						<span class="status-badge ${statusClass}">${file.status}</span>
+					</div>
 				</div>
 				${videoInfoHtml}
 				${progressBarHtml}
@@ -286,6 +309,33 @@ function formatDuration(seconds) {
 	const m = Math.floor((seconds % 3600) / 60);
 	const s = Math.floor(seconds % 60);
 	return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+
+// "HH:MM:SS.ms" 형식의 FFmpeg 시간 문자열을 초 단위로 변환 (형식이 다르면 null)
+function parseTimeToSeconds(timeStr) {
+	const parts = (timeStr || '').split(':');
+	if (parts.length !== 3) return null;
+	const seconds = parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2]);
+	return isNaN(seconds) ? null : seconds;
+}
+
+
+// 인코딩된 영상 시간 뒤에 남은 예상 시간((전체 길이 - 현재 위치) / speed)을 붙여 반환
+function formatTimeWithEta(file) {
+	const current = parseTimeToSeconds(file.progress.time);
+	const speed = parseFloat(file.progress.speed);
+	const duration = file.video_info ? file.video_info.duration : 0;
+	// 프레임 기준((전체 프레임 - 현재 프레임) / 인코딩 fps), 불가하면 time 기준((전체 길이 - 현재 위치) / speed)
+	const totalFrames = file.video_info ? duration * file.video_info.fps : 0;
+
+	let eta = '--:--:--';
+	if (totalFrames > 0 && file.progress.fps > 0) {
+		eta = formatDuration(Math.max(totalFrames - file.progress.frame, 0) / file.progress.fps);
+	} else if (current !== null && speed > 0 && duration > 0) {
+		eta = formatDuration(Math.max(duration - current, 0) / speed);
+	}
+	return `${file.progress.time} (남은 예상 시간 = ${eta})`;
 }
 
 
@@ -333,6 +383,49 @@ async function stopAll() {
 		}
 	} catch (error) {
 		alert('중단 중 오류 발생: ' + error.message);
+	}
+}
+
+
+async function refreshFiles() {
+	const refreshBtn = document.getElementById('refreshBtn');
+	refreshBtn.disabled = true;
+
+	try {
+		const response = await fetch('/refresh', { method: 'POST' });
+		const result = await response.json();
+
+		if (!result.success) {
+			alert(result.message || '새로고침 실패');
+		}
+	} catch (error) {
+		alert('새로고침 중 오류 발생: ' + error.message);
+	} finally {
+		refreshBtn.disabled = false;
+	}
+}
+
+
+async function moveFile(filename, direction) {
+	try {
+		const response = await fetch('/move-file', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				filename: filename,
+				direction: direction
+			})
+		});
+
+		const result = await response.json();
+
+		if (!result.success) {
+			alert(result.message || '순서 변경 실패');
+		}
+	} catch (error) {
+		alert('순서 변경 중 오류 발생: ' + error.message);
 	}
 }
 

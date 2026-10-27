@@ -18,8 +18,8 @@ import traceback
 import argparse
 
 from src.models import (
-	ConfigDef, ConfigKey, FileInfo, FileStatus,
-	ProgressInfo, ResolutionMode, VideoInfo
+	ConfigDef, ConfigKey, FileInfo, FileStatus, MoveDirection,
+	ProgressInfo, ResolutionMode, VideoCodec, VideoInfo
 )
 from src.config import ConfigManager
 from src.ws_manager import WebSocketManager
@@ -46,6 +46,7 @@ class VideoEncoder:
 		self.stop_current: bool = False
 		self.stop_all: bool = False
 		self.resolution_mode: ResolutionMode = ResolutionMode.HD
+		self.refreshing: bool = False
 		self._ensure_directories()
 
 
@@ -280,26 +281,130 @@ class VideoEncoder:
 		return sorted(self.input_dir.glob("*.mp4"))
 
 
-	async def prepare_files(self) -> None:
-		"""비디오 파일 목록을 읽고 각 파일의 메타데이터를 수집하여 FileInfo 목록을 구성합니다."""
-		video_files = await self.get_video_files()
-		self.files = []
+	async def create_file_info(self, video_file: Path) -> FileInfo:
+		"""
+		비디오 파일의 메타데이터를 수집하여 FileInfo 를 생성합니다.
 
-		for video_file in video_files:
-			file_info = FileInfo(str(video_file.name))
-			subtitle_file = self.find_subtitle(video_file)
-			file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
-			file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
-			file_info.resolution_mode = self.resolution_mode
-			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
-			file_info.output_filename = self.generate_output_filename(
-				video_file,
-				file_info.video_info,
-				file_info.subtitle_file,
-				file_info.resolution_mode,
-				use_uncensored=self.check_uncensored_pattern(video_file.name)
-			)
-			self.files.append(file_info)
+		Args:
+			video_file (Path): 비디오 파일 경로
+
+		Returns:
+			FileInfo: 메타데이터·자막·출력 파일명이 채워진 파일 정보
+		"""
+		file_info = FileInfo(str(video_file.name))
+		subtitle_file = self.find_subtitle(video_file)
+		file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
+		file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
+		file_info.resolution_mode = self.resolution_mode
+		file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
+		file_info.output_filename = self.generate_output_filename(
+			video_file,
+			file_info.video_info,
+			file_info.subtitle_file,
+			file_info.resolution_mode,
+			use_uncensored=self.check_uncensored_pattern(video_file.name)
+		)
+		return file_info
+
+
+	def _get_current_file(self) -> Optional[FileInfo]:
+		"""
+		현재 인코딩 중인 파일 정보를 반환합니다.
+
+		Returns:
+			Optional[FileInfo]: 인코딩 중인 파일 정보, 없으면 None
+		"""
+		if (0 <= self.current_file_index < len(self.files)):
+			return self.files[self.current_file_index]
+		return None
+
+
+	def _sync_current_index(self, current: Optional[FileInfo]) -> None:
+		"""
+		목록 변경(삭제·이동) 후 인코딩 중인 파일의 새 위치로 current_file_index 를 맞춥니다.
+
+		Args:
+			current (Optional[FileInfo]): 목록 변경 전에 인코딩 중이던 파일 정보
+		"""
+		if (current is not None):
+			self.current_file_index = self.files.index(current)
+
+
+	async def refresh_files(self, websocket_manager: WebSocketManager) -> Optional[Dict[str, int]]:
+		"""
+		입력 디렉토리를 다시 읽어 파일 목록을 갱신합니다.
+		삭제된 파일은 목록에서 제거하고(인코딩 중인 파일 제외), 신규 파일은 목록 끝에
+		하나씩 추가하며 추가할 때마다 전체 상태를 브로드캐스트합니다.
+
+		Args:
+			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
+
+		Returns:
+			Optional[Dict[str, int]]: {"removed": 제거 수, "added": 추가 수}, 이미 새로고침 중이면 None
+		"""
+		if (self.refreshing):
+			return None
+
+		self.refreshing = True
+		try:
+			video_files = await self.get_video_files()
+			video_names = {video_file.name for video_file in video_files}
+
+			current = self._get_current_file()
+			count_before = len(self.files)
+			self.files = [f for f in self.files if ((f.filename in video_names) or (f is current))]
+			removed = count_before - len(self.files)
+			self._sync_current_index(current)
+			if (0 < removed):
+				await websocket_manager.broadcast_all_status(self.get_all_status())
+
+			added = 0
+			for video_file in video_files:
+				if (any(f.filename == video_file.name for f in self.files)):
+					continue
+				self.files.append(await self.create_file_info(video_file))
+				added += 1
+				await websocket_manager.broadcast_all_status(self.get_all_status())
+
+			return {"removed": removed, "added": added}
+		finally:
+			self.refreshing = False
+
+
+	def move_file(self, filename: str, direction: MoveDirection) -> bool:
+		"""
+		대기 중인 파일의 목록 내 위치를 이동합니다. (인코딩 순서도 함께 바뀜)
+		위쪽으로는 인코딩 완료·진행 중인 파일보다 위로 올라갈 수 없습니다.
+
+		Args:
+			filename (str): 이동할 파일명
+			direction (MoveDirection): 이동 방향 (처음으로 / 한칸위 / 한칸아래 / 마지막으로)
+
+		Returns:
+			bool: 이동했으면 True, 파일이 없거나 대기 상태가 아니면 False
+		"""
+		file_info = next((f for f in self.files if (f.filename == filename)), None)
+		if ((file_info is None) or (file_info.status != FileStatus.PENDING)):
+			return False
+
+		current = self._get_current_file()
+		index = self.files.index(file_info)
+		targets = {
+			MoveDirection.FIRST: 0,
+			MoveDirection.UP: index - 1,
+			MoveDirection.DOWN: index + 1,
+			MoveDirection.LAST: len(self.files) - 1
+		}
+		# 위쪽 한계: 이 파일 위에 있는 마지막 완료·진행 중 파일의 바로 아래
+		top_limit = 0
+		for i in range(index):
+			if (self.files[i].status in (FileStatus.COMPLETED, FileStatus.IN_PROGRESS)):
+				top_limit = i + 1
+		target = min(max(targets[direction], top_limit), len(self.files) - 1)
+
+		self.files.insert(target, self.files.pop(index))
+		self._sync_current_index(current)
+		return True
 
 
 	def set_resolution_mode(self, filename: str, resolution_mode: str) -> bool:
@@ -340,6 +445,87 @@ class VideoEncoder:
 		return False
 
 
+	def get_video_codec(self) -> VideoCodec:
+		"""
+		설정의 video_codec 값을 VideoCodec 으로 변환합니다.
+		값이 없거나 지원하지 않는 코덱이면 기본 코덱(SVT-AV1)을 사용합니다.
+
+		Returns:
+			VideoCodec: 인코딩에 사용할 영상 코덱
+		"""
+		codec_name = self.config.get(ConfigKey.VIDEO_CODEC, ConfigDef.DEFAULT_VIDEO_CODEC)
+		try:
+			return VideoCodec(codec_name)
+		except ValueError:
+			print(f"지원하지 않는 video_codec '{codec_name}', 기본값 {ConfigDef.DEFAULT_VIDEO_CODEC} 사용")
+			return VideoCodec(ConfigDef.DEFAULT_VIDEO_CODEC)
+
+
+	def get_crf(self, video_codec: VideoCodec) -> int:
+		"""
+		인코딩에 사용할 CRF 값을 반환합니다.
+		설정(또는 --crf 인자)에 값이 있으면 그 값을, 없으면(null) 코덱별 권장값을 사용합니다.
+
+		Args:
+			video_codec (VideoCodec): 인코딩에 사용할 영상 코덱
+
+		Returns:
+			int: CRF 값
+		"""
+		crf = self.config.get(ConfigKey.CRF)
+		if (crf is not None):
+			return crf
+		if (video_codec == VideoCodec.X265):
+			return ConfigDef.DEFAULT_CRF_X265
+		return ConfigDef.DEFAULT_CRF_SVT_AV1
+
+
+	def get_svtav1_pix_fmt(self) -> str:
+		"""
+		설정의 SVT-AV1 비트 깊이(8 또는 10)에 맞는 픽셀 포맷을 반환합니다.
+		지원하지 않는 값이면 기본 비트 깊이(10)를 사용합니다.
+
+		Returns:
+			str: FFmpeg 픽셀 포맷 (yuv420p 또는 yuv420p10le)
+		"""
+		pix_fmts = {8: "yuv420p", 10: "yuv420p10le"}
+		bit_depth = self.config.get(ConfigKey.SVTAV1_BIT_DEPTH, ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH)
+		if (bit_depth not in pix_fmts):
+			print(f"지원하지 않는 svtav1_bit_depth '{bit_depth}', 기본값 {ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH} 사용")
+			bit_depth = ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH
+		return pix_fmts[bit_depth]
+
+
+	def get_preset(self, video_codec: VideoCodec) -> str:
+		"""
+		코덱별 인코딩 preset 값을 반환합니다. (x265: slow 고정, SVT-AV1: 설정 값)
+
+		Args:
+			video_codec (VideoCodec): 인코딩에 사용할 영상 코덱
+
+		Returns:
+			str: preset 값
+		"""
+		if (video_codec == VideoCodec.X265):
+			return "slow"
+		return str(self.config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET))
+
+
+	def get_encode_settings(self) -> Dict[str, Any]:
+		"""
+		웹 UI 표시용 인코딩 설정(코덱, preset, CRF)을 반환합니다.
+
+		Returns:
+			Dict[str, Any]: {"codec": 코덱명, "preset": preset, "crf": CRF} 딕셔너리
+		"""
+		video_codec = self.get_video_codec()
+		return {
+			"codec": video_codec.value,
+			"preset": self.get_preset(video_codec),
+			"crf": self.get_crf(video_codec)
+		}
+
+
 	def build_ffmpeg_command(self, file_info: FileInfo) -> List[str]:
 		"""FileInfo를 기반으로 FFmpeg 인코딩 명령어 리스트를 생성합니다.
 
@@ -365,12 +551,24 @@ class VideoEncoder:
 			subtitle_path = self.subtitle_dir / subtitle_file.name
 			cmd.extend(["-i", str(subtitle_path)])
 
+		video_codec = self.get_video_codec()
 		cmd.extend([
 			"-f", "mp4",
-			"-c:v", "libx265",
-			"-crf:v", str(self.config.get(ConfigKey.CRF)),
-			"-preset:v", "slow",
-			"-tune:v", "ssim",
+			"-c:v", video_codec.value,
+			"-crf:v", str(self.get_crf(video_codec))
+		])
+
+		# 코덱별 전용 옵션 (libsvtav1 은 -tune 옵션이 없어 svtav1-params 로 전달)
+		if (video_codec == VideoCodec.X265):
+			cmd.extend(["-preset:v", self.get_preset(video_codec), "-tune:v", "ssim"])
+		else:
+			cmd.extend([
+				"-preset:v", self.get_preset(video_codec),
+				"-pix_fmt", self.get_svtav1_pix_fmt(),
+				"-svtav1-params", "tune=0"
+			])
+
+		cmd.extend([
 			"-avoid_negative_ts", "make_zero",
 			"-fps_mode", "cfr",
 			"-movflags", "+faststart"
@@ -442,9 +640,15 @@ class VideoEncoder:
 			file_info.progress.size = size_match.group(1)
 		if (time_match):
 			file_info.progress.time = time_match.group(1)
-			if (file_info.video_info.duration_seconds > 0):
-				current_seconds = self.parse_time_to_seconds(time_match.group(1))
-				file_info.progress.progress_percent = (current_seconds / file_info.video_info.duration_seconds) * 100
+
+		# 진행률은 프레임 수 기준 (SVT-AV1 은 time 값이 실제 진행보다 앞서 나가는 경우가 있음)
+		# 프레임 정보를 쓸 수 없을 때만 time 기준으로 계산
+		total_frames = file_info.video_info.duration_seconds * file_info.video_info.fps
+		if ((frame_match) and (0 < total_frames)):
+			file_info.progress.progress_percent = min(file_info.progress.frame / total_frames * 100, 100.0)
+		elif ((time_match) and (file_info.video_info.duration_seconds > 0)):
+			current_seconds = self.parse_time_to_seconds(time_match.group(1))
+			file_info.progress.progress_percent = (current_seconds / file_info.video_info.duration_seconds) * 100
 		if (bitrate_match):
 			file_info.progress.bitrate = bitrate_match.group(1)
 		if (speed_match):
@@ -574,6 +778,7 @@ class VideoEncoder:
 		all_status = {
 			"type": "full",
 			"files": [f.to_dict() for f in self.files],
+			"encode_settings": self.get_encode_settings(),
 			"current_index": self.current_file_index,
 			"overall_progress": round(overall_progress, 1),
 			"completed_count": completed,
@@ -617,7 +822,9 @@ class VideoEncoder:
 
 	async def encode_all(self, websocket_manager: WebSocketManager) -> None:
 		"""모든 대기 중인 파일을 순차적으로 인코딩합니다.
-		설정을 다시 로드하고 파일 목록을 준비한 후 WebSocket으로 상태를 전송합니다.
+		설정을 다시 로드하고 파일 목록을 새로고침한 후 WebSocket으로 상태를 전송합니다.
+		중단·실패한 파일은 다시 대기 상태로 돌리고, 완료된 파일은 건너뜁니다.
+		인코딩 중 새로고침·순서 변경이 반영되도록 매번 목록의 첫 번째 대기 파일을 선택합니다.
 
 		Args:
 			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
@@ -631,17 +838,19 @@ class VideoEncoder:
 		except Exception as e:
 			print(f"config error: {e}")
 
-		await self.prepare_files()
+		await self.refresh_files(websocket_manager)
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.STOPPED, FileStatus.FAILED)):
+				file_info.status = FileStatus.PENDING
+				file_info.progress = ProgressInfo()
 		await websocket_manager.broadcast_all_status(self.get_all_status())
 
-		for idx, file_info in enumerate(self.files):
-			if (self.stop_all):
+		while (not self.stop_all):
+			file_info = next((f for f in self.files if (f.status == FileStatus.PENDING)), None)
+			if (file_info is None):
 				break
 
-			if (file_info.status == FileStatus.COMPLETED):
-				continue
-
-			self.current_file_index = idx
+			self.current_file_index = self.files.index(file_info)
 			await self.encode_file(file_info, websocket_manager)
 
 		self.current_file_index = -1
@@ -686,7 +895,12 @@ class VideoEncoder:
 		print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
 		print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
 		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
-		print(f"CRF: {config.get(ConfigKey.CRF)}")
+		video_codec = self.get_video_codec()
+		print(f"영상 코덱: {video_codec.value}")
+		if (video_codec == VideoCodec.SVT_AV1):
+			print(f"SVT-AV1 preset: {config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET)}")
+			print(f"SVT-AV1 픽셀 포맷: {self.get_svtav1_pix_fmt()}")
+		print(f"CRF: {self.get_crf(video_codec)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
 		print(f"default resolution: {self.resolution_mode.value}")

@@ -270,7 +270,7 @@ class TestUpdateFromArgs:
 		config_manager.update_from_args(mock_args)
 		
 		assert config_manager.config[ConfigKey.FFMPEG_PATH] is not None
-		assert config_manager.config[ConfigKey.CRF] is not None
+		assert config_manager.config[ConfigKey.CRF] == ConfigDef.DEFAULT_CRF
 		assert config_manager.config[ConfigKey.VOLUME] is not None
 	
 	def test_updates_valid_string_values(self, config_manager: ConfigManager):
@@ -423,7 +423,7 @@ class TestIntegration:
 		"""Test full workflow: load, save, get, update."""
 		# Initial state
 		initial_crf = config_manager.get(ConfigKey.CRF)
-		assert initial_crf < 100
+		assert initial_crf is None	# 미지정 시 코덱별 권장값 사용
 		
 		# Update
 		mock_args = MockArgs(crf=65)
@@ -685,7 +685,8 @@ class TestConfigurationKeys:
 	def test_config_structure_integrity(self, config_manager: ConfigManager):
 		"""Test config structure integrity."""
 		assert isinstance(config_manager.config, dict)
-		assert all(isinstance(val, (str, int, float)) for val in config_manager.config.values())
+		assert all(isinstance(val, (str, int, float)) for key, val in config_manager.config.items() if (key != ConfigKey.CRF))
+		assert config_manager.config[ConfigKey.CRF] is None
 
 
 # ==================== ====================
