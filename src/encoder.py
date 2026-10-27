@@ -159,11 +159,29 @@ class VideoEncoder:
 		return False
 
 
-	def find_subtitle(self, video_file: Path) -> Optional[Path]:
-		"""비디오 파일명과 일치하는 자막 파일(.srt)을 자막 디렉토리에서 찾습니다.
+	def _get_subtitle_candidates(self) -> List[Path]:
+		"""자막 디렉토리의 지원 자막 파일을 확장자 우선순위 순으로 반환합니다.
 
-		파일명에서 시리즈 코드(예: ABC-12345)를 추출하여 같은 코드로 시작하는
-		srt 파일을 검색합니다.
+		Returns:
+			List[Path]: 지원 확장자(.srt/.ass/.ssa/.vtt/.smi) 자막 파일 목록
+		"""
+		if (not self.subtitle_dir.exists()):
+			return []
+
+		extensions = ConfigDef.SUBTITLE_EXTENSIONS
+		candidates = [
+			subtitle_file for subtitle_file in self.subtitle_dir.iterdir()
+			if ((subtitle_file.is_file()) and (subtitle_file.suffix.lower() in extensions))
+		]
+		return sorted(candidates, key=lambda f: (extensions.index(f.suffix.lower()), f.name.lower()))
+
+
+	def find_subtitle(self, video_file: Path) -> Optional[Path]:
+		"""비디오 파일과 짝이 되는 자막 파일을 자막 디렉토리에서 찾습니다.
+
+		파일명 stem 이 같으면 가장 우선하고, 시리즈 코드(예: ABC-12345)가 같거나
+		한쪽 파일명이 다른 쪽으로 시작하면 같은 작품의 자막으로 인정합니다.
+		따라서 시리즈 코드 형식이 아닌 파일명이나 .srt 가 아닌 자막도 포함됩니다.
 
 		Args:
 			video_file (Path): 비디오 파일 경로
@@ -171,21 +189,36 @@ class VideoEncoder:
 		Returns:
 			Optional[Path]: 일치하는 자막 파일 경로 또는 None
 		"""
-		pattern = re.compile(r'^([A-Z]{3,5}-\d{2,5})')
+		candidates = self._get_subtitle_candidates()
+		if (not candidates):
+			return None
+
+		stem = video_file.stem.lower()
+		pattern = re.compile(r'^([A-Z]{3,5}-\d{2,5})', re.IGNORECASE)
 		match = pattern.match(video_file.stem)
+		series_code = match.group(1).lower() if (match) else None
 
-		if (not match):
-			return None
+		best: Optional[Path] = None
+		best_score = 0
+		for candidate in candidates:
+			candidate_stem = candidate.stem.lower()
 
-		if (not self.subtitle_dir.exists()):
-			return None
+			if (candidate_stem == stem):
+				score = 4	# 파일명 완전 일치
+			elif ((series_code is not None) and (candidate_stem.startswith(series_code))):
+				score = 3	# 시리즈 코드 일치
+			else:
+				short_stem, long_stem = sorted((candidate_stem, stem), key=len)
+				if ((ConfigDef.MIN_SUBTITLE_STEM_LENGTH <= len(short_stem)) and (long_stem.startswith(short_stem))):
+					score = 2	# 형식이 달라도 파일명 접두사 일치
+				else:
+					score = 0
 
-		base_name = match.group(1)
+			if (best_score < score):
+				best = candidate
+				best_score = score
 
-		for srt_file in self.subtitle_dir.glob(f"{base_name}*.srt"):
-			return srt_file
-
-		return None
+		return best
 
 
 	def generate_output_filename(self, input_file: Path, video_info: VideoInfo
@@ -692,6 +725,22 @@ class VideoEncoder:
 		return True
 
 
+	def _copy_subtitle(self, file_info: FileInfo) -> None:
+		"""인코딩 완료 후 자막 파일을 출력 디렉토리로 복사합니다.
+
+		출력 자막 파일명은 출력 영상의 stem 에 원본 자막 확장자를 붙여 만듭니다.
+
+		Args:
+			file_info (FileInfo): 완료된 파일 정보
+		"""
+		if ((not file_info.subtitle_file) or (not path.exists(file_info.subtitle_file))):
+			return
+
+		subtitle_source = Path(file_info.subtitle_file)
+		output_subtitle = self.output_dir / f"{Path(file_info.output_filename).stem}{subtitle_source.suffix.lower()}"
+		copy2(str(subtitle_source), str(output_subtitle))
+
+
 	async def encode_file(self, file_info: FileInfo, websocket_manager: WebSocketManager) -> bool:
 		"""단일 비디오 파일을 FFmpeg로 인코딩합니다.
 		진행률을 파싱하여 WebSocket으로 실시간 브로드캐스트하고 로그 파일에 기록합니다.
@@ -776,8 +825,7 @@ class VideoEncoder:
 				if (self.current_process.returncode == 0):
 					file_info.status = FileStatus.COMPLETED
 					file_info.progress.progress_percent = 100.0
-					if ((file_info.subtitle_file) and path.exists(file_info.subtitle_file)):
-						copy2(str(file_info.subtitle_file), str(self.output_dir / (file_info.output_filename).replace('.mp4', '.srt')))
+					self._copy_subtitle(file_info)
 					return True
 				else:
 					file_info.status = FileStatus.FAILED

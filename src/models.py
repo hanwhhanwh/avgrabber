@@ -4,7 +4,7 @@
 
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Final, Optional
+from typing import Any, Dict, Final, Optional, Tuple
 
 
 class ConfigKey:
@@ -46,6 +46,10 @@ class ConfigDef:
     HD_THRESHOLD: Final[int] = 700000
     HD_WIDTH: Final[int] = 1280
     FHD_WIDTH: Final[int] = 1920
+    # 자막 확장자 우선순위 (앞에 있을수록 우선)
+    SUBTITLE_EXTENSIONS: Final[Tuple[str, ...]] = (".srt", ".ass", ".ssa", ".vtt", ".smi")
+    # 형식이 다른 파일명끼리 접두사로 대응시킬 때 필요한 최소 공통 길이
+    MIN_SUBTITLE_STEM_LENGTH: Final[int] = 4
 
     TEMPLATES_DIR: Final[str] = "templates/"
     CSS_DIR: Final[str] = "templates/css"
