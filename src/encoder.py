@@ -330,11 +330,44 @@ class VideoEncoder:
 			self.current_file_index = self.files.index(current)
 
 
+	def _refresh_pending_subtitles(self) -> bool:
+		"""아직 인코딩을 마치지 않은 파일의 자막·출력 파일명을 다시 계산합니다.
+
+		새로고침 시점에 자막이 새로 추가되었거나 삭제된 경우를 반영합니다.
+		완료·진행 중인 파일은 이미 사용한 자막이므로 건드리지 않습니다.
+
+		Returns:
+			bool: 자막 정보가 바뀐 파일이 있으면 True
+		"""
+		changed = False
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.IN_PROGRESS, FileStatus.COMPLETED)):
+				continue
+
+			subtitle_file = self.find_subtitle(self.input_dir / file_info.filename)
+			subtitle_path = str(subtitle_file) if (subtitle_file is not None) else None
+			if (subtitle_path == file_info.subtitle_file):
+				continue
+
+			file_info.subtitle_file = subtitle_path
+			file_info.output_filename = self.generate_output_filename(
+				self.input_dir / file_info.filename,
+				file_info.video_info,
+				subtitle_path,
+				file_info.resolution_mode,
+				use_uncensored=self.check_uncensored_pattern(file_info.filename)
+			)
+			changed = True
+		return changed
+
+
 	async def refresh_files(self, websocket_manager: WebSocketManager) -> Optional[Dict[str, int]]:
 		"""
 		입력 디렉토리를 다시 읽어 파일 목록을 갱신합니다.
 		삭제된 파일은 목록에서 제거하고(인코딩 중인 파일 제외), 신규 파일은 목록 끝에
 		하나씩 추가하며 추가할 때마다 전체 상태를 브로드캐스트합니다.
+		인코딩 전이거나 재시도할 파일은 자막이 새로 생기거나 사라진 경우
+		자막·출력 파일명을 갱신합니다.
 
 		Args:
 			websocket_manager (WebSocketManager): 상태 브로드캐스트에 사용할 WebSocket 관리자
@@ -355,7 +388,9 @@ class VideoEncoder:
 			self.files = [f for f in self.files if ((f.filename in video_names) or (f is current))]
 			removed = count_before - len(self.files)
 			self._sync_current_index(current)
-			if (0 < removed):
+
+			subtitles_changed = self._refresh_pending_subtitles()
+			if ((0 < removed) or (subtitles_changed)):
 				await websocket_manager.broadcast_all_status(self.get_all_status())
 
 			added = 0
