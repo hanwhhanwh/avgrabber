@@ -342,6 +342,7 @@ class VideoEncoder:
 			FileInfo: 메타데이터·자막·출력 파일명이 채워진 파일 정보
 		"""
 		file_info = FileInfo(str(video_file.name))
+		file_info.input_size = video_file.stat().st_size if (video_file.exists()) else 0
 		subtitle_file = self.find_subtitle(video_file)
 		file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
 		file_info.subtitle_file = str(subtitle_file) if (subtitle_file is not None) else None
@@ -768,6 +769,10 @@ class VideoEncoder:
 		file_info.status = FileStatus.COMPLETED
 		file_info.progress.progress_percent = 100.0
 		file_info.elapsed_seconds = time.monotonic() - started_at
+
+		input_file = self.input_dir / file_info.filename
+		if ((file_info.input_size <= 0) and (input_file.exists())):
+			file_info.input_size = input_file.stat().st_size
 
 		output_file = self.output_dir / file_info.output_filename
 		file_info.output_size = output_file.stat().st_size if (output_file.exists()) else 0
