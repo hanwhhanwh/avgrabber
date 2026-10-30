@@ -8,7 +8,11 @@
   "video_codec": "libsvtav1",
   "svtav1_preset": 3,
   "svtav1_bit_depth": 10,
+  "x265_preset": "slow",
   "crf": null,
   "volume": 1.15,
-  "audio_bitrate": "128k"
+  "audio_bitrate": "128k",
+  "default_resolution": "HD",
+  "search_subfolders": false,
+  "preserve_folder_structure": false
 }

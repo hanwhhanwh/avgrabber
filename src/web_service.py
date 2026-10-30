@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from src.encoder import VideoEncoder
-from src.models import ConfigKey, MoveDirection
+from src.models import ConfigDef, ConfigKey, MoveDirection
 from src.ws_manager import WebSocketManager
 
 
@@ -223,6 +223,9 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
 
         previous_input_dir = encoder.config.get(ConfigKey.INPUT_DIR)
         previous_resolution = encoder.config.get(ConfigKey.DEFAULT_RESOLUTION)
+        previous_search_subfolders = encoder.config.get(
+            ConfigKey.SEARCH_SUBFOLDERS, ConfigDef.DEFAULT_SEARCH_SUBFOLDERS
+        )
         if (not encoder.config.update_values(applied)):
             return {"success": False, "message": "설정을 저장하지 못했습니다 (설정 백업 실패)"}
 
@@ -233,8 +236,16 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
         )
         encoder.apply_settings(apply_resolution=resolution_changed)
 
-        # 입력 디렉토리가 바뀌면 새 디렉토리를 다시 읽어 목록을 맞춘다.
-        if ((ConfigKey.INPUT_DIR in applied) and (applied[ConfigKey.INPUT_DIR] != previous_input_dir)):
+        # 입력 디렉토리나 하위 폴더 검색 옵션이 바뀌면 파일 목록을 다시 읽는다.
+        input_dir_changed = (
+            (ConfigKey.INPUT_DIR in applied)
+            and (applied[ConfigKey.INPUT_DIR] != previous_input_dir)
+        )
+        search_subfolders_changed = (
+            (ConfigKey.SEARCH_SUBFOLDERS in applied)
+            and (bool(applied[ConfigKey.SEARCH_SUBFOLDERS]) != bool(previous_search_subfolders))
+        )
+        if (input_dir_changed or search_subfolders_changed):
             await encoder.refresh_files(websocket_manager)
 
         await websocket_manager.broadcast_all_status(encoder.get_all_status())

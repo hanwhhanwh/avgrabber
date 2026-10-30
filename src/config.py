@@ -54,9 +54,12 @@ class ConfigManager:
 			, ConfigKey.VIDEO_CODEC: ConfigDef.DEFAULT_VIDEO_CODEC
 			, ConfigKey.SVTAV1_PRESET: ConfigDef.DEFAULT_SVTAV1_PRESET
 			, ConfigKey.SVTAV1_BIT_DEPTH: ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH
+			, ConfigKey.X265_PRESET: ConfigDef.DEFAULT_X265_PRESET
 			, ConfigKey.CRF: ConfigDef.DEFAULT_CRF
 			, ConfigKey.VOLUME: ConfigDef.DEFAULT_VOLUME
 			, ConfigKey.AUDIO_BITRATE: ConfigDef.DEFAULT_AUDIO_BITRATE
+			, ConfigKey.SEARCH_SUBFOLDERS: ConfigDef.DEFAULT_SEARCH_SUBFOLDERS
+			, ConfigKey.PRESERVE_FOLDER_STRUCTURE: ConfigDef.DEFAULT_PRESERVE_FOLDER_STRUCTURE
 			, ConfigKey.DEFAULT_RESOLUTION: ResolutionMode.HD.value
 		}
 
@@ -144,11 +147,17 @@ class ConfigManager:
 					applied[key] = None if (value in (None, "")) else self._validate_int(value, "CRF", 0, 63)
 				elif (key == ConfigKey.SVTAV1_PRESET):
 					applied[key] = self._validate_int(value, "SVT-AV1 preset", 0, 13)
+				elif (key == ConfigKey.X265_PRESET):
+					applied[key] = self._validate_choice(value, "x265 preset", ConfigDef.X265_PRESETS)
 				elif (key == ConfigKey.SVTAV1_BIT_DEPTH):
 					bit_depth = self._validate_int(value, "비트 깊이", 8, 10)
 					if (bit_depth not in (8, 10)):
 						raise ValueError("비트 깊이는 8 또는 10이어야 합니다")
 					applied[key] = bit_depth
+				elif (key == ConfigKey.SEARCH_SUBFOLDERS):
+					applied[key] = self._validate_bool(value, "하위 폴더 검색")
+				elif (key == ConfigKey.PRESERVE_FOLDER_STRUCTURE):
+					applied[key] = self._validate_bool(value, "원본 폴더 구조 유지")
 				elif (key == ConfigKey.VOLUME):
 					applied[key] = self._validate_float(value, "볼륨", 0.0, 10.0)
 				elif (key == ConfigKey.VIDEO_CODEC):
@@ -258,6 +267,31 @@ class ConfigManager:
 			if (normalized == choice.lower()):
 				return choice
 		raise ValueError(f"{label} 값은 {', '.join(choices)} 중 하나여야 합니다")
+
+
+	@staticmethod
+	def _validate_bool(value: Any, label: str) -> bool:
+		"""참/거짓 설정 값을 검증합니다.
+
+		Args:
+			value (Any): 검증할 값
+			label (str): 오류 메시지에 표시할 항목 이름
+
+		Returns:
+			bool: 검증된 참/거짓 값
+
+		Raises:
+			ValueError: 참/거짓으로 해석할 수 없을 때
+		"""
+		if (isinstance(value, bool)):
+			return value
+		if (isinstance(value, str)):
+			normalized = value.strip().lower()
+			if (normalized in ("1", "true", "yes", "on")):
+				return True
+			if (normalized in ("0", "false", "no", "off")):
+				return False
+		raise ValueError(f"{label} 값은 true 또는 false 여야 합니다")
 
 
 	def _backup_config_file(self) -> Path:
