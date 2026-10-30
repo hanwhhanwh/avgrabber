@@ -245,11 +245,25 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
             (ConfigKey.SEARCH_SUBFOLDERS in applied)
             and (bool(applied[ConfigKey.SEARCH_SUBFOLDERS]) != bool(previous_search_subfolders))
         )
-        if (input_dir_changed or search_subfolders_changed):
+        refresh_pending = (input_dir_changed or search_subfolders_changed)
+
+        # 파일 검색이 오래 걸려도 저장 여부를 바로 알 수 있도록 먼저 알린다.
+        await websocket_manager.broadcast_message({
+            "type": "settings_saved",
+            "refresh_pending": refresh_pending,
+            "encode_settings": encoder.get_encode_settings()
+        })
+
+        if (refresh_pending):
             await encoder.refresh_files(websocket_manager)
 
         await websocket_manager.broadcast_all_status(encoder.get_all_status())
-        return {"success": True, "message": "설정을 저장했습니다", "settings": encoder.config.get_all()}
+        return {
+            "success": True,
+            "message": "설정을 저장했습니다",
+            "refresh_pending": refresh_pending,
+            "settings": encoder.config.get_all()
+        }
 
 
     @app.post("/reencode")
