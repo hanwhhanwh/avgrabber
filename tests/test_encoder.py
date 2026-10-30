@@ -233,6 +233,49 @@ def test_apply_settings_applies_default_resolution_to_pending_only(tmp_path: Pat
 	assert completed.output_filename == "XYZ-999-HD.mp4"
 
 
+def test_requeue_completed_file_resets_progress(tmp_path: Path):
+	"""완료 파일을 재인코딩 대기 상태로 되돌리고 진행 정보를 초기화한다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("ABC-123.mp4", FileStatus.COMPLETED)
+	file_info.video_info.width = 3840
+	file_info.video_info.height = 2160
+	file_info.video_info.pixel_count = 3840 * 2160
+	file_info.output_filename = "ABC-123-HD.mp4"
+	file_info.output_size = 1234
+	file_info.elapsed_seconds = 5.5
+	file_info.input_size = 9999
+	file_info.progress.frame = 100
+	encoder.files = [file_info]
+
+	assert encoder.requeue_file("ABC-123.mp4") is True
+	assert file_info.status == FileStatus.PENDING
+	assert file_info.output_size == 0
+	assert file_info.elapsed_seconds == 0.0
+	assert file_info.progress.frame == 0
+	assert file_info.input_size == 9999
+	assert file_info.output_filename == "ABC-123-HD.mp4"
+
+
+@pytest.mark.parametrize("status", [
+	FileStatus.PENDING, FileStatus.IN_PROGRESS, FileStatus.FAILED, FileStatus.STOPPED
+])
+def test_requeue_rejects_non_completed_file(tmp_path: Path, status: FileStatus):
+	"""완료 상태가 아닌 파일은 재인코딩 대기로 되돌리지 않는다."""
+	encoder = make_encoder(tmp_path)
+	encoder.files = [FileInfo("ABC-123.mp4", status)]
+
+	assert encoder.requeue_file("ABC-123.mp4") is False
+	assert encoder.files[0].status == status
+
+
+def test_requeue_rejects_unknown_file(tmp_path: Path):
+	"""목록에 없는 파일은 재인코딩 대기로 되돌리지 않는다."""
+	encoder = make_encoder(tmp_path)
+	encoder.files = []
+
+	assert encoder.requeue_file("none.mp4") is False
+
+
 def make_list_encoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: List[str]) -> VideoEncoder:
 	"""
 	입력 디렉토리에 names 파일이 있는 인코더를 만듭니다. (ffprobe 대신 빈 FileInfo 생성)

@@ -378,7 +378,7 @@ class TestIntegration:
 
 
 class TestSettingsAndReencode:
-    """설정 API(/settings) 테스트."""
+    """설정 API(/settings)와 재인코딩(/reencode) 테스트."""
 
     @pytest.fixture
     def mock_encoder(self):
@@ -472,6 +472,36 @@ class TestSettingsAndReencode:
         app = create_app(None)
         with TestClient(app) as c:
             assert c.put("/settings", json={ConfigKey.CRF: 31}).json()["success"] is False
+
+    def test_reencode_starts_when_idle(self, client, mock_encoder):
+        """유휴 상태에서 재인코딩을 요청하면 바로 인코딩을 시작한다."""
+        response = client.post("/reencode", json={"filename": "ABC-123.mp4"})
+        data = response.json()
+
+        assert data["success"] is True
+        assert data["started"] is True
+        mock_encoder.requeue_file.assert_called_once_with("ABC-123.mp4")
+
+    def test_reencode_rejects_non_completed(self, client, mock_encoder):
+        """완료된 파일이 아니면 재인코딩을 거부한다."""
+        mock_encoder.requeue_file = Mock(return_value=False)
+
+        response = client.post("/reencode", json={"filename": "ABC-123.mp4"})
+
+        assert response.json()["success"] is False
+
+    def test_reencode_requires_filename(self, client, mock_encoder):
+        """파일명이 없으면 실패 응답."""
+        response = client.post("/reencode", json={})
+
+        assert response.json()["success"] is False
+
+    def test_reencode_no_encoder(self):
+        """POST /reencode 는 인코더가 없으면 실패 응답."""
+        app = create_app(None)
+        with TestClient(app) as c:
+            assert c.post("/reencode", json={"filename": "ABC-123.mp4"}).json()["success"] is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
