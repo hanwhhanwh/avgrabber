@@ -157,6 +157,16 @@ class TestBroadcast_Status:
 		ws1.send_json.assert_called_once()
 		ws2.send_json.assert_called_once()
 
+	def test_broadcast_message(self):
+		"""임의 메시지를 모든 연결에 전송한다."""
+		manager = WebSocketManager()
+		ws1 = make_websocket()
+		connect_all(manager, ws1)
+
+		message = {"type": "settings_saved", "refresh_pending": True}
+		asyncio.run(manager.broadcast_message(message))
+		ws1.send_json.assert_called_once_with(message)
+
 	def test_broadcast_all_status_with_nonexistent_json(self):
 		""" 테스트 12: JSON 에러 시연 Test"""
 		manager = WebSocketManager()

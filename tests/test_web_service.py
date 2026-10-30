@@ -389,6 +389,9 @@ class TestSettingsAndReencode:
         encoder.requeue_file = Mock(return_value=True)
         encoder.apply_settings = Mock()
         encoder.get_all_status = Mock(return_value={"files": []})
+        encoder.get_encode_settings = Mock(return_value={
+            "codec": "libsvtav1", "preset": "3", "crf": 30, "default_resolution": "HD"
+        })
         encoder.config = Mock()
         encoder.config.get = Mock(return_value="/old/in")
         encoder.config.get_all = Mock(return_value={ConfigKey.CRF: 30})
@@ -437,6 +440,26 @@ class TestSettingsAndReencode:
 
         assert response.json()["success"] is True
         mock_encoder.apply_settings.assert_called_once_with(apply_resolution=True)
+
+    def test_update_settings_broadcasts_saved_before_refresh(self, mock_encoder):
+        """입력 폴더 검색 전에 settings_saved 메시지를 보내 저장 여부를 먼저 알린다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.INPUT_DIR: "/new/in"}, {})
+        )
+
+        with patch('src.web_service.WebSocketManager.broadcast_message', new_callable=AsyncMock) as broadcast:
+            app = create_app(mock_encoder)
+            with TestClient(app) as client:
+                response = client.put("/settings", json={ConfigKey.INPUT_DIR: "/new/in"})
+
+        data = response.json()
+        assert data["success"] is True
+        assert data["refresh_pending"] is True
+        broadcast.assert_awaited_once()
+        message = broadcast.await_args.args[0]
+        assert message["type"] == "settings_saved"
+        assert message["refresh_pending"] is True
+        assert message["encode_settings"]["codec"] == "libsvtav1"
 
     def test_update_settings_refreshes_on_input_dir_change(self, client, mock_encoder):
         """입력 디렉토리가 바뀌면 파일 목록을 다시 읽는다."""
