@@ -10,9 +10,9 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional
+from typing import Any, Dict, Final, List, Optional, Tuple
 
-from src.models import ConfigKey, ConfigDef, ResolutionMode
+from src.models import ConfigKey, ConfigDef, ResolutionMode, VideoCodec
 
 
 CONFIG_BACKUP_PATTERN: Final[re.Pattern] = re.compile(r"\.(\d{8}-\d{6})(?:-(\d+))?\.bak$")
@@ -91,6 +91,173 @@ class ConfigManager:
 			Any: 설정 값 또는 기본값
 		"""
 		return self.config.get(key, default)
+
+
+	def get_all(self) -> Dict[str, Any]:
+		"""기본값을 포함한 전체 설정 값을 반환합니다.
+
+		Returns:
+			Dict[str, Any]: 기본 설정에 현재 설정 값을 덮어쓴 딕셔너리
+		"""
+		return {**self._get_default_config(), **self.config}
+
+
+	def update_values(self, values: Dict[str, Any]) -> bool:
+		"""설정 값을 메모리에 반영하고 설정 파일에 저장합니다.
+
+		Args:
+			values (Dict[str, Any]): 반영할 설정 키와 값
+
+		Returns:
+			bool: 파일에 저장했으면 True, 백업 실패로 건너뛰었으면 False
+		"""
+		self.config.update(values)
+		return self._save_config()
+
+
+	def validate_updates(self, values: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str]]:
+		"""웹 설정 페이지에서 받은 값을 검증하고 정규화합니다.
+
+		Args:
+			values (Dict[str, Any]): 검증할 설정 키와 값
+
+		Returns:
+			Tuple[Dict[str, Any], Dict[str, str]]: 정규화된 설정 값과 키별 오류 메시지
+		"""
+		text_keys = {
+			ConfigKey.FFMPEG_PATH: "FFmpeg 경로",
+			ConfigKey.FFPROBE_PATH: "FFprobe 경로",
+			ConfigKey.INPUT_DIR: "입력 디렉토리",
+			ConfigKey.OUTPUT_DIR: "출력 디렉토리",
+			ConfigKey.SUBTITLE_DIR: "자막 디렉토리",
+			ConfigKey.LOG_DIR: "로그 디렉토리",
+			ConfigKey.AUDIO_BITRATE: "오디오 비트레이트"
+		}
+		applied: Dict[str, Any] = {}
+		errors: Dict[str, str] = {}
+
+		for key, value in values.items():
+			try:
+				if (key in text_keys):
+					applied[key] = self._validate_text(value, text_keys[key])
+				elif (key == ConfigKey.CRF):
+					applied[key] = None if (value in (None, "")) else self._validate_int(value, "CRF", 0, 63)
+				elif (key == ConfigKey.SVTAV1_PRESET):
+					applied[key] = self._validate_int(value, "SVT-AV1 preset", 0, 13)
+				elif (key == ConfigKey.SVTAV1_BIT_DEPTH):
+					bit_depth = self._validate_int(value, "비트 깊이", 8, 10)
+					if (bit_depth not in (8, 10)):
+						raise ValueError("비트 깊이는 8 또는 10이어야 합니다")
+					applied[key] = bit_depth
+				elif (key == ConfigKey.VOLUME):
+					applied[key] = self._validate_float(value, "볼륨", 0.0, 10.0)
+				elif (key == ConfigKey.VIDEO_CODEC):
+					applied[key] = self._validate_choice(value, "영상 코덱", tuple(codec.value for codec in VideoCodec))
+				elif (key == ConfigKey.DEFAULT_RESOLUTION):
+					applied[key] = self._validate_choice(value, "기본 해상도", tuple(mode.value for mode in ResolutionMode))
+				else:
+					errors[key] = "알 수 없는 설정 항목입니다"
+			except ValueError as e:
+				errors[key] = str(e)
+
+		return applied, errors
+
+
+	@staticmethod
+	def _validate_text(value: Any, label: str) -> str:
+		"""비어 있지 않은 문자열 설정 값을 검증합니다.
+
+		Args:
+			value (Any): 검증할 값
+			label (str): 오류 메시지에 표시할 항목 이름
+
+		Returns:
+			str: 앞뒤 공백을 제거한 문자열
+
+		Raises:
+			ValueError: 문자열이 아니거나 비어 있을 때
+		"""
+		if ((not isinstance(value, str)) or (not value.strip())):
+			raise ValueError(f"{label} 값을 입력해야 합니다")
+		return value.strip()
+
+
+	@staticmethod
+	def _validate_int(value: Any, label: str, minimum: int, maximum: int) -> int:
+		"""정수 설정 값을 범위와 함께 검증합니다.
+
+		Args:
+			value (Any): 검증할 값
+			label (str): 오류 메시지에 표시할 항목 이름
+			minimum (int): 허용하는 최소값
+			maximum (int): 허용하는 최대값
+
+		Returns:
+			int: 검증된 정수 값
+
+		Raises:
+			ValueError: 정수가 아니거나 범위를 벗어날 때
+		"""
+		if ((isinstance(value, bool)) or (isinstance(value, float) and (not value.is_integer()))):
+			raise ValueError(f"{label} 값은 정수여야 합니다")
+		try:
+			number = int(value)
+		except (TypeError, ValueError):
+			raise ValueError(f"{label} 값은 정수여야 합니다")
+		if (not (minimum <= number <= maximum)):
+			raise ValueError(f"{label} 값은 {minimum}~{maximum} 범위여야 합니다")
+		return number
+
+
+	@staticmethod
+	def _validate_float(value: Any, label: str, minimum: float, maximum: float) -> float:
+		"""실수 설정 값을 범위와 함께 검증합니다.
+
+		Args:
+			value (Any): 검증할 값
+			label (str): 오류 메시지에 표시할 항목 이름
+			minimum (float): 허용하는 최소값
+			maximum (float): 허용하는 최대값
+
+		Returns:
+			float: 검증된 실수 값
+
+		Raises:
+			ValueError: 실수가 아니거나 범위를 벗어날 때
+		"""
+		if (isinstance(value, bool)):
+			raise ValueError(f"{label} 값은 숫자여야 합니다")
+		try:
+			number = float(value)
+		except (TypeError, ValueError):
+			raise ValueError(f"{label} 값은 숫자여야 합니다")
+		if (not (minimum <= number <= maximum)):
+			raise ValueError(f"{label} 값은 {minimum}~{maximum} 범위여야 합니다")
+		return number
+
+
+	@staticmethod
+	def _validate_choice(value: Any, label: str, choices: Tuple[str, ...]) -> str:
+		"""정해진 선택지 중 하나인지 검증하고 정규화된 값을 반환합니다.
+
+		Args:
+			value (Any): 검증할 값
+			label (str): 오류 메시지에 표시할 항목 이름
+			choices (Tuple[str, ...]): 허용하는 값 목록
+
+		Returns:
+			str: 선택지에 정의된 정규화된 값
+
+		Raises:
+			ValueError: 문자열이 아니거나 선택지에 없을 때
+		"""
+		if (not isinstance(value, str)):
+			raise ValueError(f"{label} 값이 올바르지 않습니다")
+		normalized = value.strip().lower()
+		for choice in choices:
+			if (normalized == choice.lower()):
+				return choice
+		raise ValueError(f"{label} 값은 {', '.join(choices)} 중 하나여야 합니다")
 
 
 	def _backup_config_file(self) -> Path:

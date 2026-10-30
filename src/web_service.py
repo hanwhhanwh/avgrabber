@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from src.encoder import VideoEncoder
-from src.models import MoveDirection
+from src.models import ConfigKey, MoveDirection
 from src.ws_manager import WebSocketManager
 
 
@@ -191,6 +191,54 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
             return {"success": True, "message": "해상도 모드를 변경했습니다"}
         else:
             return {"success": False, "message": "파일을 찾을 수 없습니다"}
+
+
+    @app.get("/settings")
+    async def get_settings() -> Dict[str, Any]:
+        """현재 기본 설정(conf/encode.json)을 반환합니다."""
+        if (encoder is None):
+            return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+        return {"success": True, "settings": encoder.config.get_all()}
+
+
+    @app.put("/settings")
+    async def update_settings(data: Dict[str, Any]) -> Dict[str, Any]:
+        """기본 설정을 검증·저장하고 실행 중인 인코더에 즉시 반영합니다.
+
+        Args:
+            data (Dict[str, Any]): 변경할 설정 키와 값
+
+        Returns:
+            Dict[str, Any]: 성공 여부, 저장된 설정, 키별 오류 메시지를 담은 딕셔너리
+        """
+        if (encoder is None):
+            return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+        applied, errors = encoder.config.validate_updates(data)
+        if (errors):
+            return {"success": False, "message": "설정 값을 확인하세요", "errors": errors}
+        if (not applied):
+            return {"success": False, "message": "변경할 설정이 없습니다"}
+
+        previous_input_dir = encoder.config.get(ConfigKey.INPUT_DIR)
+        previous_resolution = encoder.config.get(ConfigKey.DEFAULT_RESOLUTION)
+        if (not encoder.config.update_values(applied)):
+            return {"success": False, "message": "설정을 저장하지 못했습니다 (설정 백업 실패)"}
+
+        # 기본 해상도가 실제로 바뀐 경우에만 대기 파일의 해상도·출력 파일명을 다시 계산한다.
+        resolution_changed = (
+            (ConfigKey.DEFAULT_RESOLUTION in applied)
+            and (str(previous_resolution).upper() != str(applied[ConfigKey.DEFAULT_RESOLUTION]).upper())
+        )
+        encoder.apply_settings(apply_resolution=resolution_changed)
+
+        # 입력 디렉토리가 바뀌면 새 디렉토리를 다시 읽어 목록을 맞춘다.
+        if ((ConfigKey.INPUT_DIR in applied) and (applied[ConfigKey.INPUT_DIR] != previous_input_dir)):
+            await encoder.refresh_files(websocket_manager)
+
+        await websocket_manager.broadcast_all_status(encoder.get_all_status())
+        return {"success": True, "message": "설정을 저장했습니다", "settings": encoder.config.get_all()}
 
 
     return app

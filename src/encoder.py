@@ -531,6 +531,56 @@ class VideoEncoder:
 		return False
 
 
+	def apply_settings(self, apply_resolution: bool = False) -> None:
+		"""변경된 설정을 인코더의 경로·기본 해상도에 즉시 반영합니다.
+
+		Args:
+			apply_resolution (bool): True 이면 아직 시작하지 않은 파일의 해상도와
+				출력 파일명도 새 기본 해상도로 다시 계산합니다.
+		"""
+		self.input_dir = Path(self.config.get(ConfigKey.INPUT_DIR))
+		self.output_dir = Path(self.config.get(ConfigKey.OUTPUT_DIR))
+		self.subtitle_dir = Path(self.config.get(ConfigKey.SUBTITLE_DIR))
+		self.log_dir = Path(self.config.get(ConfigKey.LOG_DIR))
+		self.resolution_mode = self.get_default_resolution()
+		self._ensure_directories()
+
+		if (apply_resolution):
+			self.apply_default_resolution()
+
+
+	def apply_default_resolution(self) -> None:
+		"""아직 시작하지 않은 파일에 기본 해상도를 적용하고 출력 파일명을 다시 계산합니다.
+		진행 중·완료된 파일은 이미 인코딩했거나 진행 중이므로 변경하지 않습니다.
+		"""
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.IN_PROGRESS, FileStatus.COMPLETED)):
+				continue
+
+			file_info.resolution_mode = self.resolution_mode
+			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, self.resolution_mode)
+			file_info.output_filename = self.generate_output_filename(
+				self.input_dir / file_info.filename,
+				file_info.video_info,
+				file_info.subtitle_file,
+				self.resolution_mode,
+				use_uncensored=self.check_uncensored_pattern(file_info.filename)
+			)
+
+
+	def get_default_resolution(self) -> ResolutionMode:
+		"""설정에 저장된 기본 해상도 모드를 반환합니다.
+
+		Returns:
+			ResolutionMode: 기본 해상도 모드 (값이 잘못되어 있으면 HD)
+		"""
+		configured = self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value)
+		try:
+			return ResolutionMode(configured)
+		except ValueError:
+			return ResolutionMode.HD
+
+
 	def get_video_codec(self) -> VideoCodec:
 		"""
 		설정의 video_codec 값을 VideoCodec 으로 변환합니다.
@@ -599,16 +649,17 @@ class VideoEncoder:
 
 	def get_encode_settings(self) -> Dict[str, Any]:
 		"""
-		웹 UI 표시용 인코딩 설정(코덱, preset, CRF)을 반환합니다.
+		웹 UI 표시용 인코딩 설정(코덱, preset, CRF, 기본 해상도)을 반환합니다.
 
 		Returns:
-			Dict[str, Any]: {"codec": 코덱명, "preset": preset, "crf": CRF} 딕셔너리
+			Dict[str, Any]: 코덱명, preset, CRF, 기본 해상도를 담은 딕셔너리
 		"""
 		video_codec = self.get_video_codec()
 		return {
 			"codec": video_codec.value,
 			"preset": self.get_preset(video_codec),
-			"crf": self.get_crf(video_codec)
+			"crf": self.get_crf(video_codec),
+			"default_resolution": self.get_default_resolution().value
 		}
 
 
