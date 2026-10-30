@@ -632,6 +632,32 @@ body {
 	box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
+.settings-help {
+	font-size: 12px;
+	color: #6c757d;
+	font-weight: normal;
+}
+
+.settings-field.settings-checkbox {
+	flex-direction: row;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.settings-field.settings-checkbox input[type="checkbox"] {
+	width: 16px;
+	height: 16px;
+	padding: 0;
+	margin: 0;
+	accent-color: #667eea;
+}
+
+.settings-field.settings-checkbox .settings-help {
+	flex-basis: 100%;
+	margin-left: 24px;
+}
+
 .settings-actions {
 	display: flex;
 	align-items: center;

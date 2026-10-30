@@ -504,17 +504,38 @@ async function changeResolution(filename, resolution) {
 
 
 // 설정 페이지 항목 정의 (conf/encode.json)
+const X265_PRESET_OPTIONS = [
+	['ultrafast', 'ultrafast (가장 빠름)'],
+	['superfast', 'superfast'],
+	['veryfast', 'veryfast'],
+	['faster', 'faster'],
+	['fast', 'fast'],
+	['medium', 'medium'],
+	['slow', 'slow (기본)'],
+	['slower', 'slower'],
+	['veryslow', 'veryslow'],
+	['placebo', 'placebo (가장 느림)']
+];
+
 const SETTINGS_SECTIONS = [
 	{
 		title: '인코딩',
 		fields: [
 			{ key: 'video_codec', label: '영상 코덱', type: 'select', options: [['libsvtav1', 'SVT-AV1'], ['libx265', 'x265']] },
-			{ key: 'svtav1_preset', label: 'SVT-AV1 Preset (0~13)', type: 'number', min: 0, max: 13, step: 1 },
-			{ key: 'svtav1_bit_depth', label: '비트 깊이', type: 'select', options: [['8', '8 bit'], ['10', '10 bit']] },
+			{ key: 'svtav1_preset', label: 'SVT-AV1 Preset (0~13)', type: 'number', min: 0, max: 13, step: 1, codec: 'libsvtav1', help: '0 = 가장 느림·최고 품질, 13 = 가장 빠름' },
+			{ key: 'x265_preset', label: 'x265 Preset', type: 'select', options: X265_PRESET_OPTIONS, codec: 'libx265', help: '빠를수록 인코딩은 빨라지고 품질·압축 효율은 낮아집니다. x265는 항상 10 bit로 인코딩합니다' },
+			{ key: 'svtav1_bit_depth', label: 'SVT-AV1 비트 깊이', type: 'select', options: [['8', '8 bit'], ['10', '10 bit']], codec: 'libsvtav1', help: 'SVT-AV1 픽셀 포맷입니다' },
 			{ key: 'crf', label: 'CRF (비우면 자동)', type: 'number', min: 0, max: 63, step: 1, nullable: true },
 			{ key: 'volume', label: '볼륨', type: 'number', min: 0, max: 10, step: 0.05 },
 			{ key: 'audio_bitrate', label: '오디오 비트레이트', type: 'text' },
 			{ key: 'default_resolution', label: '기본 해상도', type: 'select', options: [['HD', 'HD (1280)'], ['FHD', 'FHD (1920)']] }
+		]
+	},
+	{
+		title: '검색·저장',
+		fields: [
+			{ key: 'search_subfolders', label: '하위 폴더 내 영상 검색', type: 'checkbox', help: '입력 디렉토리 아래 모든 폴더의 MP4 파일을 검색합니다 (기본: 사용 안 함)' },
+			{ key: 'preserve_folder_structure', label: '원본 폴더 구조 유지', type: 'checkbox', help: '출력 디렉토리에 입력 파일의 하위 폴더 구조를 그대로 만듭니다 (기본: 사용 안 함)' }
 		]
 	},
 	{
@@ -577,16 +598,31 @@ async function changeDefaultResolution(resolution) {
 function renderSettingsField(field, value) {
 	const id = `setting_${field.key}`;
 	const label = escapeHtml(field.label);
+	const help = field.help ? `<small class="settings-help">${escapeHtml(field.help)}</small>` : '';
+	const codecClass = field.codec ? ' codec-field' : '';
+	const codecAttr = field.codec ? ` data-codec="${escapeHtml(field.codec)}"` : '';
+
+	if (field.type === 'checkbox') {
+		return `
+			<label class="settings-field settings-checkbox${codecClass}"${codecAttr} for="${id}">
+				<input id="${id}" type="checkbox" ${value ? 'checked' : ''}>
+				<span>${label}</span>
+				${help}
+			</label>
+		`;
+	}
 
 	if (field.type === 'select') {
 		const options = field.options.map(([optionValue, optionLabel]) => {
 			const selected = (String(optionValue).toLowerCase() === String(value).toLowerCase()) ? 'selected' : '';
 			return `<option value="${escapeHtml(optionValue)}" ${selected}>${escapeHtml(optionLabel)}</option>`;
 		}).join('');
+		const onchange = (field.key === 'video_codec') ? ' onchange="onVideoCodecChange(this.value)"' : '';
 		return `
-			<label class="settings-field" for="${id}">
+			<label class="settings-field${codecClass}"${codecAttr} for="${id}">
 				<span>${label}</span>
-				<select id="${id}">${options}</select>
+				<select id="${id}"${onchange}>${options}</select>
+				${help}
 			</label>
 		`;
 	}
@@ -595,11 +631,26 @@ function renderSettingsField(field, value) {
 		? `type="number" min="${field.min}" max="${field.max}" step="${field.step}"`
 		: 'type="text"';
 	return `
-		<label class="settings-field" for="${id}">
+		<label class="settings-field${codecClass}"${codecAttr} for="${id}">
 			<span>${label}</span>
 			<input id="${id}" ${attributes} value="${escapeHtml(value)}" autocomplete="off">
+			${help}
 		</label>
 	`;
+}
+
+
+// 선택한 코덱에 해당하는 preset·bit depth 항목만 표시한다.
+function applyCodecFieldVisibility(codec) {
+	const normalized = (codec || 'libsvtav1').toLowerCase();
+	document.querySelectorAll('.codec-field').forEach((element) => {
+		element.style.display = (element.dataset.codec.toLowerCase() === normalized) ? '' : 'none';
+	});
+}
+
+
+function onVideoCodecChange(codec) {
+	applyCodecFieldVisibility(codec);
 }
 
 
@@ -630,6 +681,8 @@ function renderSettingsPage(settings) {
 			</div>
 		</div>
 	`;
+
+	applyCodecFieldVisibility(settings.video_codec || 'libsvtav1');
 }
 
 
@@ -682,6 +735,11 @@ async function saveSettings() {
 		for (const field of section.fields) {
 			const input = document.getElementById(`setting_${field.key}`);
 			if (!input) continue;
+
+			if (field.type === 'checkbox') {
+				payload[field.key] = input.checked;
+				continue;
+			}
 
 			const raw = input.value.trim();
 			payload[field.key] = (field.nullable && raw === '') ? null : raw;
