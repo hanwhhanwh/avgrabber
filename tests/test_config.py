@@ -719,5 +719,84 @@ class TestResolutionModes:
 		assert ResolutionMode.HD.value == "HD"
 
 
+class TestRuntimeSettings:
+	"""웹 설정 페이지에서 쓰는 조회·검증·저장 기능 테스트."""
+
+	def test_get_all_merges_defaults(self, config_manager: ConfigManager):
+		"""기본값이 빠진 설정 파일도 기본값과 합쳐 전체 항목을 반환한다."""
+		config_manager.config = {ConfigKey.CRF: 30}
+		settings = config_manager.get_all()
+
+		assert settings[ConfigKey.CRF] == 30
+		assert settings[ConfigKey.SVTAV1_BIT_DEPTH] == ConfigDef.DEFAULT_SVTAV1_BIT_DEPTH
+		assert config_manager.config == {ConfigKey.CRF: 30}
+
+	def test_update_values_saves_file(self, config_file, config_manager: ConfigManager):
+		"""변경한 설정을 메모리와 파일에 함께 반영한다."""
+		assert config_manager.update_values({ConfigKey.CRF: 31, ConfigKey.DEFAULT_RESOLUTION: "FHD"}) is True
+
+		saved = json.loads(Path(config_file).read_text(encoding="utf-8"))
+		assert saved[ConfigKey.CRF] == 31
+		assert saved[ConfigKey.DEFAULT_RESOLUTION] == "FHD"
+		assert config_manager.get(ConfigKey.CRF) == 31
+
+	def test_validate_updates_normalizes_values(self, config_manager: ConfigManager):
+		"""문자열로 들어온 숫자·대소문자 값을 정규화한다."""
+		applied, errors = config_manager.validate_updates({
+			ConfigKey.CRF: "30",
+			ConfigKey.SVTAV1_PRESET: "5",
+			ConfigKey.SVTAV1_BIT_DEPTH: "8",
+			ConfigKey.VOLUME: "1.1",
+			ConfigKey.VIDEO_CODEC: "LIBX265",
+			ConfigKey.DEFAULT_RESOLUTION: "fhd",
+			ConfigKey.INPUT_DIR: " /tmp/in ",
+		})
+
+		assert errors == {}
+		assert applied[ConfigKey.CRF] == 30
+		assert applied[ConfigKey.SVTAV1_PRESET] == 5
+		assert applied[ConfigKey.SVTAV1_BIT_DEPTH] == 8
+		assert applied[ConfigKey.VOLUME] == 1.1
+		assert applied[ConfigKey.VIDEO_CODEC] == "libx265"
+		assert applied[ConfigKey.DEFAULT_RESOLUTION] == "FHD"
+		assert applied[ConfigKey.INPUT_DIR] == "/tmp/in"
+
+	def test_validate_updates_allows_auto_crf(self, config_manager: ConfigManager):
+		"""CRF 를 비우면 None(코덱별 권장값)으로 정규화한다."""
+		applied, errors = config_manager.validate_updates({ConfigKey.CRF: ""})
+
+		assert errors == {}
+		assert applied[ConfigKey.CRF] is None
+
+	@pytest.mark.parametrize("values, field", [
+		({ConfigKey.CRF: 99}, ConfigKey.CRF),
+		({ConfigKey.CRF: "high"}, ConfigKey.CRF),
+		({ConfigKey.SVTAV1_PRESET: "fast"}, ConfigKey.SVTAV1_PRESET),
+		({ConfigKey.SVTAV1_BIT_DEPTH: 9}, ConfigKey.SVTAV1_BIT_DEPTH),
+		({ConfigKey.VOLUME: "loud"}, ConfigKey.VOLUME),
+		({ConfigKey.VIDEO_CODEC: "libvpx"}, ConfigKey.VIDEO_CODEC),
+		({ConfigKey.DEFAULT_RESOLUTION: "XYZ"}, ConfigKey.DEFAULT_RESOLUTION),
+		({ConfigKey.INPUT_DIR: "   "}, ConfigKey.INPUT_DIR),
+		({"unknown_key": 1}, "unknown_key"),
+	])
+	def test_validate_updates_rejects_invalid_values(self, config_manager: ConfigManager, values, field):
+		"""범위를 벗어나거나 알 수 없는 항목은 키별 오류로 돌려준다."""
+		applied, errors = config_manager.validate_updates(values)
+
+		assert field in errors
+		assert field not in applied
+
+	def test_validate_updates_reports_all_errors(self, config_manager: ConfigManager):
+		"""여러 항목이 잘못되면 모두 오류로 돌려준다."""
+		applied, errors = config_manager.validate_updates({
+			ConfigKey.CRF: 100,
+			ConfigKey.VOLUME: "loud",
+			ConfigKey.OUTPUT_DIR: "/tmp/out",
+		})
+
+		assert set(errors) == {ConfigKey.CRF, ConfigKey.VOLUME}
+		assert applied == {ConfigKey.OUTPUT_DIR: "/tmp/out"}
+
+
 if __name__ == "__main__":
 	pytest.main([__file__, "-v", "--cov"])

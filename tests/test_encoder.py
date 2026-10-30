@@ -162,13 +162,75 @@ def test_svt_av1_bit_depth_from_config(tmp_path: Path, bit_depth: int, expected_
 
 
 @pytest.mark.parametrize("codec, expected", [
-	("libsvtav1", {"codec": "libsvtav1", "preset": "3", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1}),
-	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265}),
+	("libsvtav1", {"codec": "libsvtav1", "preset": "3", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1, "default_resolution": "HD"}),
+	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265, "default_resolution": "HD"}),
 ])
 def test_encode_settings(tmp_path: Path, codec: str, expected: Dict[str, Any]):
 	"""웹 UI 표시용 인코딩 설정은 실제 명령과 같은 코덱·preset·CRF 를 반환한다."""
 	encoder = make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: codec, ConfigKey.CRF: None})
 	assert encoder.get_encode_settings() == expected
+
+
+def test_encode_settings_includes_default_resolution(tmp_path: Path):
+	"""웹 UI 인코딩 설정에 기본 해상도가 포함된다."""
+	encoder = make_encoder(tmp_path, **{ConfigKey.DEFAULT_RESOLUTION: "FHD"})
+	assert encoder.get_encode_settings()["default_resolution"] == "FHD"
+
+
+def test_apply_settings_updates_directories(tmp_path: Path):
+	"""설정 변경 시 입력·출력·자막·로그 경로를 다시 읽고 디렉토리를 만든다."""
+	input_dir = tmp_path / "in"
+	output_dir = tmp_path / "out"
+	subtitle_dir = tmp_path / "subs"
+	log_dir = tmp_path / "logs"
+	encoder = make_encoder(tmp_path, **{
+		ConfigKey.INPUT_DIR: str(input_dir),
+		ConfigKey.OUTPUT_DIR: str(output_dir),
+		ConfigKey.SUBTITLE_DIR: str(subtitle_dir),
+		ConfigKey.LOG_DIR: str(log_dir),
+	})
+	encoder.files = []
+
+	encoder.apply_settings()
+
+	assert encoder.input_dir == input_dir
+	assert encoder.output_dir == output_dir
+	assert encoder.subtitle_dir == subtitle_dir
+	assert encoder.log_dir == log_dir
+	assert output_dir.exists()
+	assert log_dir.exists()
+
+
+def test_apply_settings_applies_default_resolution_to_pending_only(tmp_path: Path):
+	"""기본 해상도 변경은 시작하지 않은 파일에만 적용되고 완료 파일은 유지된다."""
+	encoder = make_encoder(tmp_path, **{
+		ConfigKey.DEFAULT_RESOLUTION: "FHD",
+		ConfigKey.INPUT_DIR: str(tmp_path),
+		ConfigKey.OUTPUT_DIR: str(tmp_path),
+		ConfigKey.SUBTITLE_DIR: str(tmp_path),
+		ConfigKey.LOG_DIR: str(tmp_path),
+	})
+	pending = FileInfo("ABC-123.mp4")
+	pending.video_info.width = 1920
+	pending.video_info.height = 1080
+	pending.video_info.pixel_count = 1920 * 1080
+	pending.resolution_mode = ResolutionMode.HD
+	pending.output_filename = "ABC-123-HD.mp4"
+	completed = FileInfo("XYZ-999.mp4", FileStatus.COMPLETED)
+	completed.video_info.width = 1920
+	completed.video_info.height = 1080
+	completed.video_info.pixel_count = 1920 * 1080
+	completed.resolution_mode = ResolutionMode.HD
+	completed.output_filename = "XYZ-999-HD.mp4"
+	encoder.files = [pending, completed]
+
+	encoder.apply_settings(apply_resolution=True)
+
+	assert pending.resolution_mode == ResolutionMode.FHD
+	assert pending.output_filename == "ABC-123-FHD.mp4"
+	assert pending.scale_filter is None
+	assert completed.resolution_mode == ResolutionMode.HD
+	assert completed.output_filename == "XYZ-999-HD.mp4"
 
 
 def make_list_encoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: List[str]) -> VideoEncoder:
