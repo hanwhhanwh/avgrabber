@@ -28,6 +28,10 @@ function connect() {
 		} else if (data.type === 'current') {
 			updateCurrentFile(data);
 			updateOverallProgress(data);
+		} else if (data.type === 'settings_saved') {
+			// 파일 검색이 길어져도 설정이 저장된 즉시 알 수 있도록 먼저 표시한다.
+			updateEncodeSettings(data.encode_settings);
+			showSettingsSaved(data.refresh_pending);
 		}
 	};
 	
@@ -728,6 +732,19 @@ function toggleSettings() {
 }
 
 
+function showSettingsSaved(refreshPending) {
+	if (!settingsOpen) return;
+
+	const status = document.getElementById('settingsStatus');
+	if (!status) return;
+
+	status.textContent = refreshPending
+		? '✓ 저장했습니다 (파일 목록 갱신 중...)'
+		: '✓ 저장했습니다';
+	status.className = 'settings-status success';
+}
+
+
 async function saveSettings() {
 	const status = document.getElementById('settingsStatus');
 	const payload = {};
@@ -748,7 +765,7 @@ async function saveSettings() {
 	}
 
 	if (status) {
-		status.textContent = '저장 중...';
+		status.textContent = '저장 중... (입력 폴더 검색 시 시간이 걸릴 수 있습니다)';
 		status.className = 'settings-status';
 	}
 
@@ -765,7 +782,9 @@ async function saveSettings() {
 	}
 
 	if (status) {
-		status.textContent = '✓ 저장했습니다';
+		status.textContent = result.refresh_pending
+			? '✓ 저장했습니다 · 파일 목록 갱신 완료'
+			: '✓ 저장했습니다';
 		status.className = 'settings-status success';
 	}
 }
