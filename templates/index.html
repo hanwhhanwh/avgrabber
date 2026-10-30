@@ -12,8 +12,11 @@
 	<div class="header">
 		<h1>🎬 FFmpeg 인코딩 모니터</h1>
 		<p>실시간 동영상 인코딩 진행 상황</p>
-		<div class="connection-status" id="connectionStatus">
-			<span class="disconnected">연결 중...</span>
+		<div class="header-actions">
+			<div class="connection-status" id="connectionStatus">
+				<span class="disconnected">연결 중...</span>
+			</div>
+			<button class="btn-settings" id="settingsBtn" onclick="toggleSettings()">⚙️ 설정</button>
 		</div>
 	</div>
 
