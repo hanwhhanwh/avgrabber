@@ -241,4 +241,36 @@ def create_app(encoder: VideoEncoder) -> FastAPI:
         return {"success": True, "message": "설정을 저장했습니다", "settings": encoder.config.get_all()}
 
 
+    @app.post("/reencode")
+    async def reencode_file(data: Dict[str, str]) -> Dict[str, Any]:
+        """완료된 파일을 대기 상태로 되돌리고, 인코딩 중이 아니면 바로 다시 인코딩합니다.
+
+        Args:
+            data (Dict[str, str]): {"filename": "파일명"} 형식의 요청 데이터
+
+        Returns:
+            Dict[str, Any]: 성공 여부, 재인코딩 시작 여부, 메시지를 담은 딕셔너리
+        """
+        nonlocal encoding_task
+
+        if (encoder is None):
+            return {"success": False, "message": "인코더가 초기화되지 않았습니다"}
+
+        filename = data.get("filename")
+        if (not filename):
+            return {"success": False, "message": "파일명을 지정해야 합니다"}
+
+        if (not encoder.requeue_file(filename)):
+            return {"success": False, "message": "완료된 파일을 찾을 수 없습니다"}
+
+        await websocket_manager.broadcast_all_status(encoder.get_all_status())
+
+        started = (encoding_task is None or encoding_task.done())
+        if (started):
+            encoding_task = asyncio.create_task(encoder.encode_all(websocket_manager))
+
+        message = "재인코딩을 시작했습니다" if (started) else "재인코딩 대기열에 추가했습니다"
+        return {"success": True, "started": started, "message": message}
+
+
     return app

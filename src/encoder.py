@@ -568,6 +568,34 @@ class VideoEncoder:
 			)
 
 
+	def requeue_file(self, filename: str) -> bool:
+		"""완료된 파일을 다시 인코딩할 수 있도록 대기 상태로 되돌립니다.
+
+		Args:
+			filename (str): 다시 인코딩할 파일명
+
+		Returns:
+			bool: 대기 상태로 되돌렸으면 True, 완료된 파일을 찾지 못하면 False
+		"""
+		file_info = next((f for f in self.files if (f.filename == filename)), None)
+		if ((file_info is None) or (file_info.status != FileStatus.COMPLETED)):
+			return False
+
+		file_info.status = FileStatus.PENDING
+		file_info.progress = ProgressInfo()
+		file_info.output_size = 0
+		file_info.elapsed_seconds = 0.0
+		file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
+		file_info.output_filename = self.generate_output_filename(
+			self.input_dir / file_info.filename,
+			file_info.video_info,
+			file_info.subtitle_file,
+			file_info.resolution_mode,
+			use_uncensored=self.check_uncensored_pattern(file_info.filename)
+		)
+		return True
+
+
 	def get_default_resolution(self) -> ResolutionMode:
 		"""설정에 저장된 기본 해상도 모드를 반환합니다.
 
