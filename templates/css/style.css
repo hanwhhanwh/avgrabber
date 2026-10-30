@@ -606,6 +606,17 @@ body {
 	gap: 12px 20px;
 }
 
+/* 경로 항목은 FFmpeg 2개, 입력/출력 2개를 한 행에 배치해 입력 폭을 넓힌다 */
+.settings-section-paths .settings-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+	.settings-section-paths .settings-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
 .settings-field {
 	display: flex;
 	flex-direction: column;
