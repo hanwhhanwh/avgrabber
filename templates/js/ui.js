@@ -540,6 +540,7 @@ const SETTINGS_SECTIONS = [
 	},
 	{
 		title: '경로',
+		className: 'settings-section-paths',
 		fields: [
 			{ key: 'ffmpeg_path', label: 'FFmpeg 경로', type: 'text' },
 			{ key: 'ffprobe_path', label: 'FFprobe 경로', type: 'text' },
@@ -656,7 +657,7 @@ function onVideoCodecChange(codec) {
 
 function renderSettingsPage(settings) {
 	const sections = SETTINGS_SECTIONS.map((section) => `
-		<div class="settings-section">
+		<div class="settings-section ${escapeHtml(section.className || '')}">
 			<h3>${escapeHtml(section.title)}</h3>
 			<div class="settings-grid">
 				${section.fields.map((field) => renderSettingsField(field, settings[field.key])).join('')}
