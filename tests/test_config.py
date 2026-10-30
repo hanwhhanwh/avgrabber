@@ -768,11 +768,34 @@ class TestRuntimeSettings:
 		assert errors == {}
 		assert applied[ConfigKey.CRF] is None
 
+	def test_get_all_includes_new_option_defaults(self, config_manager: ConfigManager):
+		"""코덱 preset·검색·폴더 구조 옵션의 기본값을 포함한다."""
+		settings = config_manager.get_all()
+
+		assert settings[ConfigKey.X265_PRESET] == ConfigDef.DEFAULT_X265_PRESET
+		assert settings[ConfigKey.SEARCH_SUBFOLDERS] is False
+		assert settings[ConfigKey.PRESERVE_FOLDER_STRUCTURE] is False
+
+	def test_validate_updates_accepts_new_options(self, config_manager: ConfigManager):
+		"""x265 preset 과 두 가지 참/거짓 옵션을 정규화한다."""
+		applied, errors = config_manager.validate_updates({
+			ConfigKey.X265_PRESET: "MEDIUM",
+			ConfigKey.SEARCH_SUBFOLDERS: "true",
+			ConfigKey.PRESERVE_FOLDER_STRUCTURE: False,
+		})
+
+		assert errors == {}
+		assert applied[ConfigKey.X265_PRESET] == "medium"
+		assert applied[ConfigKey.SEARCH_SUBFOLDERS] is True
+		assert applied[ConfigKey.PRESERVE_FOLDER_STRUCTURE] is False
+
 	@pytest.mark.parametrize("values, field", [
 		({ConfigKey.CRF: 99}, ConfigKey.CRF),
 		({ConfigKey.CRF: "high"}, ConfigKey.CRF),
 		({ConfigKey.SVTAV1_PRESET: "fast"}, ConfigKey.SVTAV1_PRESET),
+		({ConfigKey.X265_PRESET: "turbo"}, ConfigKey.X265_PRESET),
 		({ConfigKey.SVTAV1_BIT_DEPTH: 9}, ConfigKey.SVTAV1_BIT_DEPTH),
+		({ConfigKey.SEARCH_SUBFOLDERS: "maybe"}, ConfigKey.SEARCH_SUBFOLDERS),
 		({ConfigKey.VOLUME: "loud"}, ConfigKey.VOLUME),
 		({ConfigKey.VIDEO_CODEC: "libvpx"}, ConfigKey.VIDEO_CODEC),
 		({ConfigKey.DEFAULT_RESOLUTION: "XYZ"}, ConfigKey.DEFAULT_RESOLUTION),

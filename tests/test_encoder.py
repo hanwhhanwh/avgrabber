@@ -76,6 +76,9 @@ def make_encoder(tmp_path: Path, **values: Any) -> VideoEncoder:
 	encoder.input_dir = tmp_path
 	encoder.output_dir = tmp_path
 	encoder.subtitle_dir = tmp_path / "subs"
+	encoder.log_dir = tmp_path / "logs"
+	encoder.search_subfolders = False
+	encoder.preserve_folder_structure = False
 	return encoder
 
 
@@ -119,13 +122,31 @@ def test_svt_av1_command_options(tmp_path: Path):
 
 
 def test_x265_command_options(tmp_path: Path):
-	"""x265 선택 시 기존 옵션(slow, ssim)을 그대로 사용한다."""
+	"""x265 선택 시 slow·ssim 과 10 bit 픽셀 포맷을 사용한다."""
 	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: "libx265"}))
 	assert cmd[cmd.index("-c:v") + 1] == "libx265"
 	assert cmd[cmd.index("-preset:v") + 1] == "slow"
 	assert cmd[cmd.index("-tune:v") + 1] == "ssim"
+	assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p10le"
 	assert "-svtav1-params" not in cmd
-	assert "-pix_fmt" not in cmd
+
+
+def test_x265_preset_from_config(tmp_path: Path):
+	"""x265_preset 설정 값이 -preset:v 로 전달된다."""
+	cmd = build_command(make_encoder(tmp_path, **{
+		ConfigKey.VIDEO_CODEC: "libx265",
+		ConfigKey.X265_PRESET: "medium",
+	}))
+	assert cmd[cmd.index("-preset:v") + 1] == "medium"
+
+
+def test_x265_invalid_preset_falls_back_to_default(tmp_path: Path):
+	"""지원하지 않는 x265 preset 은 기본값 slow 로 대체한다."""
+	cmd = build_command(make_encoder(tmp_path, **{
+		ConfigKey.VIDEO_CODEC: "libx265",
+		ConfigKey.X265_PRESET: "turbo",
+	}))
+	assert cmd[cmd.index("-preset:v") + 1] == "slow"
 
 
 @pytest.mark.parametrize("codec, expected_crf", [
@@ -188,6 +209,8 @@ def test_apply_settings_updates_directories(tmp_path: Path):
 		ConfigKey.OUTPUT_DIR: str(output_dir),
 		ConfigKey.SUBTITLE_DIR: str(subtitle_dir),
 		ConfigKey.LOG_DIR: str(log_dir),
+		ConfigKey.SEARCH_SUBFOLDERS: True,
+		ConfigKey.PRESERVE_FOLDER_STRUCTURE: True,
 	})
 	encoder.files = []
 
@@ -197,6 +220,8 @@ def test_apply_settings_updates_directories(tmp_path: Path):
 	assert encoder.output_dir == output_dir
 	assert encoder.subtitle_dir == subtitle_dir
 	assert encoder.log_dir == log_dir
+	assert encoder.search_subfolders is True
+	assert encoder.preserve_folder_structure is True
 	assert output_dir.exists()
 	assert log_dir.exists()
 
@@ -231,6 +256,71 @@ def test_apply_settings_applies_default_resolution_to_pending_only(tmp_path: Pat
 	assert pending.scale_filter is None
 	assert completed.resolution_mode == ResolutionMode.HD
 	assert completed.output_filename == "XYZ-999-HD.mp4"
+
+
+def test_get_video_files_searches_subfolders_when_enabled(tmp_path: Path):
+	"""search_subfolders 가 켜지면 하위 폴더의 MP4 도 찾는다."""
+	(tmp_path / "a.mp4").write_bytes(b"")
+	nested = tmp_path / "sub"
+	nested.mkdir()
+	(nested / "b.mp4").write_bytes(b"")
+	encoder = make_encoder(tmp_path)
+
+	assert [path.name for path in asyncio.run(encoder.get_video_files())] == ["a.mp4"]
+
+	encoder.search_subfolders = True
+	assert sorted(path.name for path in asyncio.run(encoder.get_video_files())) == ["a.mp4", "b.mp4"]
+
+
+def test_relative_filename_uses_posix_relative_path(tmp_path: Path):
+	"""하위 폴더 파일은 입력 디렉토리 기준 POSIX 상대 경로로 보관한다."""
+	encoder = make_encoder(tmp_path)
+	nested = tmp_path / "sub" / "ABC-123.mp4"
+
+	assert encoder._relative_filename(nested) == "sub/ABC-123.mp4"
+
+
+def test_refresh_adds_subfolder_file_with_relative_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""하위 폴더 검색이 켜져 있으면 재귀 검색 결과를 상대 경로로 목록에 추가한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.search_subfolders = True
+	nested = tmp_path / "sub"
+	nested.mkdir()
+	(nested / "ABC-123.mp4").write_bytes(b"")
+
+	async def fake_create_file_info(video_file: Path) -> FileInfo:
+		return FileInfo(encoder._relative_filename(video_file))
+
+	monkeypatch.setattr(encoder, "create_file_info", fake_create_file_info)
+
+	result = asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert result == {"removed": 0, "added": 1}
+	assert filenames(encoder) == ["sub/ABC-123.mp4"]
+
+
+def test_get_output_file_mirrors_folder_structure(tmp_path: Path):
+	"""preserve_folder_structure 가 켜지면 출력 경로에 입력 하위 폴더를 붙인다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("sub/ABC-123.mp4")
+	file_info.output_filename = "ABC-123-HD.mp4"
+
+	assert encoder.get_output_file(file_info) == tmp_path / "ABC-123-HD.mp4"
+
+	encoder.preserve_folder_structure = True
+	assert encoder.get_output_file(file_info) == tmp_path / "sub" / "ABC-123-HD.mp4"
+
+
+def test_build_command_uses_mirrored_output_path(tmp_path: Path):
+	"""폴더 구조 유지가 켜지면 ffmpeg 출력 경로도 하위 폴더를 포함한다."""
+	encoder = make_encoder(tmp_path)
+	encoder.preserve_folder_structure = True
+	file_info = FileInfo("sub/ABC-123.mp4")
+	file_info.output_filename = "ABC-123-HD.mp4"
+
+	cmd = encoder.build_ffmpeg_command(file_info)
+
+	assert cmd[-1] == str(tmp_path / "sub" / "ABC-123-HD.mp4")
 
 
 def test_requeue_completed_file_resets_progress(tmp_path: Path):

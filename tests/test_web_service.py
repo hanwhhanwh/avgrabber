@@ -447,6 +447,34 @@ class TestSettingsAndReencode:
         assert response.json()["success"] is True
         assert mock_encoder.refresh_files.await_count == 1
 
+    def test_update_settings_refreshes_on_search_subfolders_change(self, client, mock_encoder):
+        """하위 폴더 검색 옵션이 바뀌면 파일 목록을 다시 읽는다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.SEARCH_SUBFOLDERS: True}, {})
+        )
+        mock_encoder.config.get = Mock(side_effect=lambda key, default=None: {
+            ConfigKey.SEARCH_SUBFOLDERS: False
+        }.get(key, default))
+
+        response = client.put("/settings", json={ConfigKey.SEARCH_SUBFOLDERS: True})
+
+        assert response.json()["success"] is True
+        assert mock_encoder.refresh_files.await_count == 1
+
+    def test_update_settings_skips_refresh_when_search_option_unchanged(self, client, mock_encoder):
+        """하위 폴더 검색 옵션이 그대로면 목록을 다시 읽지 않는다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.SEARCH_SUBFOLDERS: True}, {})
+        )
+        mock_encoder.config.get = Mock(side_effect=lambda key, default=None: {
+            ConfigKey.SEARCH_SUBFOLDERS: True
+        }.get(key, default))
+
+        response = client.put("/settings", json={ConfigKey.SEARCH_SUBFOLDERS: True})
+
+        assert response.json()["success"] is True
+        assert mock_encoder.refresh_files.await_count == 0
+
     def test_update_settings_rejects_invalid_value(self, client, mock_encoder):
         """검증 오류가 있으면 저장하지 않고 키별 오류를 반환한다."""
         mock_encoder.config.validate_updates = Mock(return_value=({}, {ConfigKey.CRF: "범위 오류"}))
