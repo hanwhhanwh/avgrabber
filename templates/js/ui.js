@@ -1,27 +1,37 @@
 let ws = null;
 let isEncoding = false;
 let filesData = [];
+let lastFullData = null;
+let settingsOpen = false;
 
 
 function connect() {
 	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 	ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-	
+
 	ws.onopen = () => {
 		updateConnectionStatus(true);
 	};
-	
+
 	ws.onmessage = (event) => {
 		const data = JSON.parse(event.data);
-		
+
 		if (data.type === 'full') {
+			lastFullData = data;
 			filesData = data.files;
 			updateEncodeSettings(data.encode_settings);
-			updateFileList(data);
+			// 설정 페이지를 보는 동안에는 목록 갱신이 페이지를 덮어쓰지 않도록 한다.
+			if (!settingsOpen) {
+				updateFileList(data);
+			}
 			updateOverallProgress(data);
 		} else if (data.type === 'current') {
 			updateCurrentFile(data);
 			updateOverallProgress(data);
+		} else if (data.type === 'settings_saved') {
+			// 파일 검색이 길어져도 설정이 저장된 즉시 알 수 있도록 먼저 표시한다.
+			updateEncodeSettings(data.encode_settings);
+			showSettingsSaved(data.refresh_pending);
 		}
 	};
 	
@@ -48,10 +58,19 @@ function updateConnectionStatus(connected) {
 
 function updateEncodeSettings(settings) {
 	if (!settings) return;
+	const resolution = (settings.default_resolution || 'HD').toUpperCase();
+	const crf = (settings.crf === null || settings.crf === undefined) ? '자동' : escapeHtml(settings.crf);
 	document.getElementById('encodeSettings').innerHTML = `
-		<span><span class="info-label">코덱:</span> ${settings.codec}</span>
-		<span><span class="info-label">Preset:</span> ${settings.preset}</span>
-		<span><span class="info-label">CRF:</span> ${settings.crf}</span>
+		<span><span class="info-label">코덱:</span> ${escapeHtml(settings.codec)}</span>
+		<span><span class="info-label">Preset:</span> ${escapeHtml(settings.preset)}</span>
+		<span><span class="info-label">CRF:</span> ${crf}</span>
+		<span class="encode-settings-right">
+			<label for="defaultResolutionSelect">기본 해상도:</label>
+			<select id="defaultResolutionSelect" onchange="changeDefaultResolution(this.value)">
+				<option value="HD" ${resolution === 'HD' ? 'selected' : ''}>HD (1280)</option>
+				<option value="FHD" ${resolution === 'FHD' ? 'selected' : ''}>FHD (1920)</option>
+			</select>
+		</span>
 	`;
 }
 
@@ -298,6 +317,9 @@ function updateFileList(data) {
 						</div>
 						` : ''}
 						${resolutionSelector}
+						${file.status === 'completed' ? `
+						<button class="btn-reencode" onclick="reencodeFile('${file.filename}')">🔄 재인코딩</button>
+						` : ''}
 						<span class="status-badge ${statusClass}">${file.status}</span>
 					</div>
 				</div>
@@ -481,6 +503,311 @@ async function changeResolution(filename, resolution) {
 		}
 	} catch (error) {
 		alert('해상도 변경 중 오류 발생: ' + error.message);
+	}
+}
+
+
+// 설정 페이지 항목 정의 (conf/encode.json)
+const X265_PRESET_OPTIONS = [
+	['ultrafast', 'ultrafast (가장 빠름)'],
+	['superfast', 'superfast'],
+	['veryfast', 'veryfast'],
+	['faster', 'faster'],
+	['fast', 'fast'],
+	['medium', 'medium'],
+	['slow', 'slow (기본)'],
+	['slower', 'slower'],
+	['veryslow', 'veryslow'],
+	['placebo', 'placebo (가장 느림)']
+];
+
+const SETTINGS_SECTIONS = [
+	{
+		title: '인코딩',
+		fields: [
+			{ key: 'video_codec', label: '영상 코덱', type: 'select', options: [['libsvtav1', 'SVT-AV1'], ['libx265', 'x265']] },
+			{ key: 'svtav1_preset', label: 'SVT-AV1 Preset (0~13)', type: 'number', min: 0, max: 13, step: 1, codec: 'libsvtav1', help: '0 = 가장 느림·최고 품질, 13 = 가장 빠름' },
+			{ key: 'x265_preset', label: 'x265 Preset', type: 'select', options: X265_PRESET_OPTIONS, codec: 'libx265', help: '빠를수록 인코딩은 빨라지고 품질·압축 효율은 낮아집니다. x265는 항상 10 bit로 인코딩합니다' },
+			{ key: 'svtav1_bit_depth', label: 'SVT-AV1 비트 깊이', type: 'select', options: [['8', '8 bit'], ['10', '10 bit']], codec: 'libsvtav1', help: 'SVT-AV1 픽셀 포맷입니다' },
+			{ key: 'crf', label: 'CRF (비우면 자동)', type: 'number', min: 0, max: 63, step: 1, nullable: true },
+			{ key: 'volume', label: '볼륨', type: 'number', min: 0, max: 10, step: 0.05 },
+			{ key: 'audio_bitrate', label: '오디오 비트레이트', type: 'text' },
+			{ key: 'default_resolution', label: '기본 해상도', type: 'select', options: [['HD', 'HD (1280)'], ['FHD', 'FHD (1920)']] }
+		]
+	},
+	{
+		title: '검색·저장',
+		fields: [
+			{ key: 'search_subfolders', label: '하위 폴더 내 영상 검색', type: 'checkbox', help: '입력 디렉토리 아래 모든 폴더의 MP4 파일을 검색합니다 (기본: 사용 안 함)' },
+			{ key: 'preserve_folder_structure', label: '원본 폴더 구조 유지', type: 'checkbox', help: '출력 디렉토리에 입력 파일의 하위 폴더 구조를 그대로 만듭니다 (기본: 사용 안 함)' }
+		]
+	},
+	{
+		title: '경로',
+		className: 'settings-section-paths',
+		fields: [
+			{ key: 'ffmpeg_path', label: 'FFmpeg 경로', type: 'text' },
+			{ key: 'ffprobe_path', label: 'FFprobe 경로', type: 'text' },
+			{ key: 'input_dir', label: '입력 디렉토리', type: 'text' },
+			{ key: 'output_dir', label: '출력 디렉토리', type: 'text' },
+			{ key: 'subtitle_dir', label: '자막 디렉토리', type: 'text' },
+			{ key: 'log_dir', label: '로그 디렉토리', type: 'text' }
+		]
+	}
+];
+
+
+function escapeHtml(value) {
+	const text = (value === null || value === undefined) ? '' : String(value);
+	return text.replace(/[&<>"']/g, (char) => ({
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		"'": '&#39;'
+	}[char]));
+}
+
+
+async function putSettings(payload) {
+	try {
+		const response = await fetch('/settings', {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(payload)
+		});
+		return await response.json();
+	} catch (error) {
+		alert('설정 저장 중 오류 발생: ' + error.message);
+		return null;
+	}
+}
+
+
+async function changeDefaultResolution(resolution) {
+	const result = await putSettings({ default_resolution: resolution });
+
+	if (!result || !result.success) {
+		alert((result && result.message) || '기본 해상도 변경 실패');
+		// 실패하면 마지막으로 알려진 값으로 되돌린다.
+		const select = document.getElementById('defaultResolutionSelect');
+		if (select && lastFullData && lastFullData.encode_settings) {
+			select.value = (lastFullData.encode_settings.default_resolution || 'HD').toUpperCase();
+		}
+	}
+}
+
+
+function renderSettingsField(field, value) {
+	const id = `setting_${field.key}`;
+	const label = escapeHtml(field.label);
+	const help = field.help ? `<small class="settings-help">${escapeHtml(field.help)}</small>` : '';
+	const codecClass = field.codec ? ' codec-field' : '';
+	const codecAttr = field.codec ? ` data-codec="${escapeHtml(field.codec)}"` : '';
+
+	if (field.type === 'checkbox') {
+		return `
+			<label class="settings-field settings-checkbox${codecClass}"${codecAttr} for="${id}">
+				<input id="${id}" type="checkbox" ${value ? 'checked' : ''}>
+				<span>${label}</span>
+				${help}
+			</label>
+		`;
+	}
+
+	if (field.type === 'select') {
+		const options = field.options.map(([optionValue, optionLabel]) => {
+			const selected = (String(optionValue).toLowerCase() === String(value).toLowerCase()) ? 'selected' : '';
+			return `<option value="${escapeHtml(optionValue)}" ${selected}>${escapeHtml(optionLabel)}</option>`;
+		}).join('');
+		const onchange = (field.key === 'video_codec') ? ' onchange="onVideoCodecChange(this.value)"' : '';
+		return `
+			<label class="settings-field${codecClass}"${codecAttr} for="${id}">
+				<span>${label}</span>
+				<select id="${id}"${onchange}>${options}</select>
+				${help}
+			</label>
+		`;
+	}
+
+	const attributes = (field.type === 'number')
+		? `type="number" min="${field.min}" max="${field.max}" step="${field.step}"`
+		: 'type="text"';
+	return `
+		<label class="settings-field${codecClass}"${codecAttr} for="${id}">
+			<span>${label}</span>
+			<input id="${id}" ${attributes} value="${escapeHtml(value)}" autocomplete="off">
+			${help}
+		</label>
+	`;
+}
+
+
+// 선택한 코덱에 해당하는 preset·bit depth 항목만 표시한다.
+function applyCodecFieldVisibility(codec) {
+	const normalized = (codec || 'libsvtav1').toLowerCase();
+	document.querySelectorAll('.codec-field').forEach((element) => {
+		element.style.display = (element.dataset.codec.toLowerCase() === normalized) ? '' : 'none';
+	});
+}
+
+
+function onVideoCodecChange(codec) {
+	applyCodecFieldVisibility(codec);
+}
+
+
+function renderSettingsPage(settings) {
+	const sections = SETTINGS_SECTIONS.map((section) => `
+		<div class="settings-section ${escapeHtml(section.className || '')}">
+			<h3>${escapeHtml(section.title)}</h3>
+			<div class="settings-grid">
+				${section.fields.map((field) => renderSettingsField(field, settings[field.key])).join('')}
+			</div>
+		</div>
+	`).join('');
+
+	document.getElementById('fileList').innerHTML = `
+		<div class="settings-page">
+			<div class="settings-header">
+				<h2>⚙️ 기본 설정</h2>
+				<button class="btn btn-secondary" onclick="closeSettings()">✖ 닫기</button>
+			</div>
+			<p class="settings-hint">
+				저장하면 conf/encode.json 에 기록되고 실행 중인 인코더에 바로 반영됩니다.
+				해상도 변경은 아직 시작하지 않은 파일에만 적용됩니다.
+			</p>
+			${sections}
+			<div class="settings-actions">
+				<button class="btn btn-primary" onclick="saveSettings()">💾 저장</button>
+				<span class="settings-status" id="settingsStatus"></span>
+			</div>
+		</div>
+	`;
+
+	applyCodecFieldVisibility(settings.video_codec || 'libsvtav1');
+}
+
+
+async function openSettings() {
+	try {
+		const response = await fetch('/settings');
+		const result = await response.json();
+
+		if (!result.success) {
+			alert(result.message || '설정을 불러오지 못했습니다');
+			return;
+		}
+
+		settingsOpen = true;
+		renderSettingsPage(result.settings);
+	} catch (error) {
+		alert('설정을 불러오는 중 오류 발생: ' + error.message);
+	}
+}
+
+
+function closeSettings() {
+	settingsOpen = false;
+	if (lastFullData) {
+		updateFileList(lastFullData);
+	} else {
+		document.getElementById('fileList').innerHTML = `
+			<div class="empty-state">
+				<p>인코딩할 파일이 없습니다</p>
+			</div>
+		`;
+	}
+}
+
+
+function toggleSettings() {
+	if (settingsOpen) {
+		closeSettings();
+	} else {
+		openSettings();
+	}
+}
+
+
+function showSettingsSaved(refreshPending) {
+	if (!settingsOpen) return;
+
+	const status = document.getElementById('settingsStatus');
+	if (!status) return;
+
+	status.textContent = refreshPending
+		? '✓ 저장했습니다 (파일 목록 갱신 중...)'
+		: '✓ 저장했습니다';
+	status.className = 'settings-status success';
+}
+
+
+async function saveSettings() {
+	const status = document.getElementById('settingsStatus');
+	const payload = {};
+
+	for (const section of SETTINGS_SECTIONS) {
+		for (const field of section.fields) {
+			const input = document.getElementById(`setting_${field.key}`);
+			if (!input) continue;
+
+			if (field.type === 'checkbox') {
+				payload[field.key] = input.checked;
+				continue;
+			}
+
+			const raw = input.value.trim();
+			payload[field.key] = (field.nullable && raw === '') ? null : raw;
+		}
+	}
+
+	if (status) {
+		status.textContent = '저장 중... (입력 폴더 검색 시 시간이 걸릴 수 있습니다)';
+		status.className = 'settings-status';
+	}
+
+	const result = await putSettings(payload);
+	if (!result || !result.success) {
+		const errors = (result && result.errors) ? Object.values(result.errors).join('\n') : '';
+		const message = errors || (result && result.message) || '설정 저장 실패';
+		if (status) {
+			status.textContent = message.replace(/\n/g, ' / ');
+			status.className = 'settings-status error';
+		}
+		alert(message);
+		return;
+	}
+
+	if (status) {
+		status.textContent = result.refresh_pending
+			? '✓ 저장했습니다 · 파일 목록 갱신 완료'
+			: '✓ 저장했습니다';
+		status.className = 'settings-status success';
+	}
+}
+
+
+async function reencodeFile(filename) {
+	if (!confirm(`"${filename}" 파일을 다시 인코딩하시겠습니까?\n기존 출력 파일은 덮어씁니다.`)) return;
+
+	try {
+		const response = await fetch('/reencode', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ filename: filename })
+		});
+
+		const result = await response.json();
+		if (!result.success) {
+			alert(result.message || '재인코딩 실패');
+		}
+	} catch (error) {
+		alert('재인코딩 중 오류 발생: ' + error.message);
 	}
 }
 

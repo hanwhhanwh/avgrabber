@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.encoder import VideoEncoder
+from src.models import ConfigKey
 from src.web_service import create_app
 
 
@@ -374,6 +375,183 @@ class TestIntegration:
                 "resolution": "fhd"
             })
             assert response.status_code == 200
+
+
+class TestSettingsAndReencode:
+    """설정 API(/settings)와 재인코딩(/reencode) 테스트."""
+
+    @pytest.fixture
+    def mock_encoder(self):
+        """설정 API 테스트용 Mock VideoEncoder."""
+        encoder = Mock(spec=VideoEncoder)
+        encoder.encode_all = AsyncMock()
+        encoder.refresh_files = AsyncMock(return_value={"removed": 0, "added": 0})
+        encoder.requeue_file = Mock(return_value=True)
+        encoder.apply_settings = Mock()
+        encoder.get_all_status = Mock(return_value={"files": []})
+        encoder.get_encode_settings = Mock(return_value={
+            "codec": "libsvtav1", "preset": "3", "crf": 30, "default_resolution": "HD"
+        })
+        encoder.config = Mock()
+        encoder.config.get = Mock(return_value="/old/in")
+        encoder.config.get_all = Mock(return_value={ConfigKey.CRF: 30})
+        encoder.config.validate_updates = Mock(return_value=({}, {}))
+        encoder.config.update_values = Mock(return_value=True)
+        return encoder
+
+    @pytest.fixture
+    def client(self, mock_encoder):
+        """TestClient 인스턴스."""
+        app = create_app(mock_encoder)
+        with TestClient(app) as c:
+            yield c
+
+    def test_get_settings_success(self, client, mock_encoder):
+        """GET /settings 는 현재 설정을 반환한다."""
+        response = client.get("/settings")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["success"] is True
+        assert data["settings"][ConfigKey.CRF] == 30
+
+    def test_get_settings_no_encoder(self):
+        """GET /settings 는 인코더가 없으면 실패 응답."""
+        app = create_app(None)
+        with TestClient(app) as c:
+            assert c.get("/settings").json()["success"] is False
+
+    def test_update_settings_success(self, client, mock_encoder):
+        """PUT /settings 는 검증·저장 후 인코더에 반영한다."""
+        mock_encoder.config.validate_updates = Mock(return_value=({ConfigKey.CRF: 31}, {}))
+
+        response = client.put("/settings", json={ConfigKey.CRF: "31"})
+        data = response.json()
+
+        assert data["success"] is True
+        mock_encoder.config.update_values.assert_called_once_with({ConfigKey.CRF: 31})
+        mock_encoder.apply_settings.assert_called_once_with(apply_resolution=False)
+
+    def test_update_settings_applies_resolution(self, client, mock_encoder):
+        """기본 해상도를 바꾸면 대기 파일 재계산까지 요청한다."""
+        mock_encoder.config.validate_updates = Mock(return_value=({ConfigKey.DEFAULT_RESOLUTION: "FHD"}, {}))
+
+        response = client.put("/settings", json={ConfigKey.DEFAULT_RESOLUTION: "FHD"})
+
+        assert response.json()["success"] is True
+        mock_encoder.apply_settings.assert_called_once_with(apply_resolution=True)
+
+    def test_update_settings_broadcasts_saved_before_refresh(self, mock_encoder):
+        """입력 폴더 검색 전에 settings_saved 메시지를 보내 저장 여부를 먼저 알린다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.INPUT_DIR: "/new/in"}, {})
+        )
+
+        with patch('src.web_service.WebSocketManager.broadcast_message', new_callable=AsyncMock) as broadcast:
+            app = create_app(mock_encoder)
+            with TestClient(app) as client:
+                response = client.put("/settings", json={ConfigKey.INPUT_DIR: "/new/in"})
+
+        data = response.json()
+        assert data["success"] is True
+        assert data["refresh_pending"] is True
+        broadcast.assert_awaited_once()
+        message = broadcast.await_args.args[0]
+        assert message["type"] == "settings_saved"
+        assert message["refresh_pending"] is True
+        assert message["encode_settings"]["codec"] == "libsvtav1"
+
+    def test_update_settings_refreshes_on_input_dir_change(self, client, mock_encoder):
+        """입력 디렉토리가 바뀌면 파일 목록을 다시 읽는다."""
+        mock_encoder.config.validate_updates = Mock(return_value=({ConfigKey.INPUT_DIR: "/new/in"}, {}))
+
+        response = client.put("/settings", json={ConfigKey.INPUT_DIR: "/new/in"})
+
+        assert response.json()["success"] is True
+        assert mock_encoder.refresh_files.await_count == 1
+
+    def test_update_settings_refreshes_on_search_subfolders_change(self, client, mock_encoder):
+        """하위 폴더 검색 옵션이 바뀌면 파일 목록을 다시 읽는다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.SEARCH_SUBFOLDERS: True}, {})
+        )
+        mock_encoder.config.get = Mock(side_effect=lambda key, default=None: {
+            ConfigKey.SEARCH_SUBFOLDERS: False
+        }.get(key, default))
+
+        response = client.put("/settings", json={ConfigKey.SEARCH_SUBFOLDERS: True})
+
+        assert response.json()["success"] is True
+        assert mock_encoder.refresh_files.await_count == 1
+
+    def test_update_settings_skips_refresh_when_search_option_unchanged(self, client, mock_encoder):
+        """하위 폴더 검색 옵션이 그대로면 목록을 다시 읽지 않는다."""
+        mock_encoder.config.validate_updates = Mock(
+            return_value=({ConfigKey.SEARCH_SUBFOLDERS: True}, {})
+        )
+        mock_encoder.config.get = Mock(side_effect=lambda key, default=None: {
+            ConfigKey.SEARCH_SUBFOLDERS: True
+        }.get(key, default))
+
+        response = client.put("/settings", json={ConfigKey.SEARCH_SUBFOLDERS: True})
+
+        assert response.json()["success"] is True
+        assert mock_encoder.refresh_files.await_count == 0
+
+    def test_update_settings_rejects_invalid_value(self, client, mock_encoder):
+        """검증 오류가 있으면 저장하지 않고 키별 오류를 반환한다."""
+        mock_encoder.config.validate_updates = Mock(return_value=({}, {ConfigKey.CRF: "범위 오류"}))
+
+        response = client.put("/settings", json={ConfigKey.CRF: 99})
+        data = response.json()
+
+        assert data["success"] is False
+        assert data["errors"][ConfigKey.CRF] == "범위 오류"
+        mock_encoder.config.update_values.assert_not_called()
+
+    def test_update_settings_reports_save_failure(self, client, mock_encoder):
+        """설정 파일 저장에 실패하면 실패 응답."""
+        mock_encoder.config.validate_updates = Mock(return_value=({ConfigKey.CRF: 31}, {}))
+        mock_encoder.config.update_values = Mock(return_value=False)
+
+        response = client.put("/settings", json={ConfigKey.CRF: 31})
+
+        assert response.json()["success"] is False
+
+    def test_update_settings_no_encoder(self):
+        """PUT /settings 는 인코더가 없으면 실패 응답."""
+        app = create_app(None)
+        with TestClient(app) as c:
+            assert c.put("/settings", json={ConfigKey.CRF: 31}).json()["success"] is False
+
+    def test_reencode_starts_when_idle(self, client, mock_encoder):
+        """유휴 상태에서 재인코딩을 요청하면 바로 인코딩을 시작한다."""
+        response = client.post("/reencode", json={"filename": "ABC-123.mp4"})
+        data = response.json()
+
+        assert data["success"] is True
+        assert data["started"] is True
+        mock_encoder.requeue_file.assert_called_once_with("ABC-123.mp4")
+
+    def test_reencode_rejects_non_completed(self, client, mock_encoder):
+        """완료된 파일이 아니면 재인코딩을 거부한다."""
+        mock_encoder.requeue_file = Mock(return_value=False)
+
+        response = client.post("/reencode", json={"filename": "ABC-123.mp4"})
+
+        assert response.json()["success"] is False
+
+    def test_reencode_requires_filename(self, client, mock_encoder):
+        """파일명이 없으면 실패 응답."""
+        response = client.post("/reencode", json={})
+
+        assert response.json()["success"] is False
+
+    def test_reencode_no_encoder(self):
+        """POST /reencode 는 인코더가 없으면 실패 응답."""
+        app = create_app(None)
+        with TestClient(app) as c:
+            assert c.post("/reencode", json={"filename": "ABC-123.mp4"}).json()["success"] is False
 
 
 if __name__ == "__main__":

@@ -76,6 +76,9 @@ def make_encoder(tmp_path: Path, **values: Any) -> VideoEncoder:
 	encoder.input_dir = tmp_path
 	encoder.output_dir = tmp_path
 	encoder.subtitle_dir = tmp_path / "subs"
+	encoder.log_dir = tmp_path / "logs"
+	encoder.search_subfolders = False
+	encoder.preserve_folder_structure = False
 	return encoder
 
 
@@ -119,13 +122,31 @@ def test_svt_av1_command_options(tmp_path: Path):
 
 
 def test_x265_command_options(tmp_path: Path):
-	"""x265 선택 시 기존 옵션(slow, ssim)을 그대로 사용한다."""
+	"""x265 선택 시 slow·ssim 과 10 bit 픽셀 포맷을 사용한다."""
 	cmd = build_command(make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: "libx265"}))
 	assert cmd[cmd.index("-c:v") + 1] == "libx265"
 	assert cmd[cmd.index("-preset:v") + 1] == "slow"
 	assert cmd[cmd.index("-tune:v") + 1] == "ssim"
+	assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p10le"
 	assert "-svtav1-params" not in cmd
-	assert "-pix_fmt" not in cmd
+
+
+def test_x265_preset_from_config(tmp_path: Path):
+	"""x265_preset 설정 값이 -preset:v 로 전달된다."""
+	cmd = build_command(make_encoder(tmp_path, **{
+		ConfigKey.VIDEO_CODEC: "libx265",
+		ConfigKey.X265_PRESET: "medium",
+	}))
+	assert cmd[cmd.index("-preset:v") + 1] == "medium"
+
+
+def test_x265_invalid_preset_falls_back_to_default(tmp_path: Path):
+	"""지원하지 않는 x265 preset 은 기본값 slow 로 대체한다."""
+	cmd = build_command(make_encoder(tmp_path, **{
+		ConfigKey.VIDEO_CODEC: "libx265",
+		ConfigKey.X265_PRESET: "turbo",
+	}))
+	assert cmd[cmd.index("-preset:v") + 1] == "slow"
 
 
 @pytest.mark.parametrize("codec, expected_crf", [
@@ -162,13 +183,187 @@ def test_svt_av1_bit_depth_from_config(tmp_path: Path, bit_depth: int, expected_
 
 
 @pytest.mark.parametrize("codec, expected", [
-	("libsvtav1", {"codec": "libsvtav1", "preset": "3", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1}),
-	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265}),
+	("libsvtav1", {"codec": "libsvtav1", "preset": "3", "crf": ConfigDef.DEFAULT_CRF_SVT_AV1, "default_resolution": "HD"}),
+	("libx265", {"codec": "libx265", "preset": "slow", "crf": ConfigDef.DEFAULT_CRF_X265, "default_resolution": "HD"}),
 ])
 def test_encode_settings(tmp_path: Path, codec: str, expected: Dict[str, Any]):
 	"""웹 UI 표시용 인코딩 설정은 실제 명령과 같은 코덱·preset·CRF 를 반환한다."""
 	encoder = make_encoder(tmp_path, **{ConfigKey.VIDEO_CODEC: codec, ConfigKey.CRF: None})
 	assert encoder.get_encode_settings() == expected
+
+
+def test_encode_settings_includes_default_resolution(tmp_path: Path):
+	"""웹 UI 인코딩 설정에 기본 해상도가 포함된다."""
+	encoder = make_encoder(tmp_path, **{ConfigKey.DEFAULT_RESOLUTION: "FHD"})
+	assert encoder.get_encode_settings()["default_resolution"] == "FHD"
+
+
+def test_apply_settings_updates_directories(tmp_path: Path):
+	"""설정 변경 시 입력·출력·자막·로그 경로를 다시 읽고 디렉토리를 만든다."""
+	input_dir = tmp_path / "in"
+	output_dir = tmp_path / "out"
+	subtitle_dir = tmp_path / "subs"
+	log_dir = tmp_path / "logs"
+	encoder = make_encoder(tmp_path, **{
+		ConfigKey.INPUT_DIR: str(input_dir),
+		ConfigKey.OUTPUT_DIR: str(output_dir),
+		ConfigKey.SUBTITLE_DIR: str(subtitle_dir),
+		ConfigKey.LOG_DIR: str(log_dir),
+		ConfigKey.SEARCH_SUBFOLDERS: True,
+		ConfigKey.PRESERVE_FOLDER_STRUCTURE: True,
+	})
+	encoder.files = []
+
+	encoder.apply_settings()
+
+	assert encoder.input_dir == input_dir
+	assert encoder.output_dir == output_dir
+	assert encoder.subtitle_dir == subtitle_dir
+	assert encoder.log_dir == log_dir
+	assert encoder.search_subfolders is True
+	assert encoder.preserve_folder_structure is True
+	assert output_dir.exists()
+	assert log_dir.exists()
+
+
+def test_apply_settings_applies_default_resolution_to_pending_only(tmp_path: Path):
+	"""기본 해상도 변경은 시작하지 않은 파일에만 적용되고 완료 파일은 유지된다."""
+	encoder = make_encoder(tmp_path, **{
+		ConfigKey.DEFAULT_RESOLUTION: "FHD",
+		ConfigKey.INPUT_DIR: str(tmp_path),
+		ConfigKey.OUTPUT_DIR: str(tmp_path),
+		ConfigKey.SUBTITLE_DIR: str(tmp_path),
+		ConfigKey.LOG_DIR: str(tmp_path),
+	})
+	pending = FileInfo("ABC-123.mp4")
+	pending.video_info.width = 1920
+	pending.video_info.height = 1080
+	pending.video_info.pixel_count = 1920 * 1080
+	pending.resolution_mode = ResolutionMode.HD
+	pending.output_filename = "ABC-123-HD.mp4"
+	completed = FileInfo("XYZ-999.mp4", FileStatus.COMPLETED)
+	completed.video_info.width = 1920
+	completed.video_info.height = 1080
+	completed.video_info.pixel_count = 1920 * 1080
+	completed.resolution_mode = ResolutionMode.HD
+	completed.output_filename = "XYZ-999-HD.mp4"
+	encoder.files = [pending, completed]
+
+	encoder.apply_settings(apply_resolution=True)
+
+	assert pending.resolution_mode == ResolutionMode.FHD
+	assert pending.output_filename == "ABC-123-FHD.mp4"
+	assert pending.scale_filter is None
+	assert completed.resolution_mode == ResolutionMode.HD
+	assert completed.output_filename == "XYZ-999-HD.mp4"
+
+
+def test_get_video_files_searches_subfolders_when_enabled(tmp_path: Path):
+	"""search_subfolders 가 켜지면 하위 폴더의 MP4 도 찾는다."""
+	(tmp_path / "a.mp4").write_bytes(b"")
+	nested = tmp_path / "sub"
+	nested.mkdir()
+	(nested / "b.mp4").write_bytes(b"")
+	encoder = make_encoder(tmp_path)
+
+	assert [path.name for path in asyncio.run(encoder.get_video_files())] == ["a.mp4"]
+
+	encoder.search_subfolders = True
+	assert sorted(path.name for path in asyncio.run(encoder.get_video_files())) == ["a.mp4", "b.mp4"]
+
+
+def test_relative_filename_uses_posix_relative_path(tmp_path: Path):
+	"""하위 폴더 파일은 입력 디렉토리 기준 POSIX 상대 경로로 보관한다."""
+	encoder = make_encoder(tmp_path)
+	nested = tmp_path / "sub" / "ABC-123.mp4"
+
+	assert encoder._relative_filename(nested) == "sub/ABC-123.mp4"
+
+
+def test_refresh_adds_subfolder_file_with_relative_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""하위 폴더 검색이 켜져 있으면 재귀 검색 결과를 상대 경로로 목록에 추가한다."""
+	encoder = make_list_encoder(tmp_path, monkeypatch, [])
+	encoder.search_subfolders = True
+	nested = tmp_path / "sub"
+	nested.mkdir()
+	(nested / "ABC-123.mp4").write_bytes(b"")
+
+	async def fake_create_file_info(video_file: Path) -> FileInfo:
+		return FileInfo(encoder._relative_filename(video_file))
+
+	monkeypatch.setattr(encoder, "create_file_info", fake_create_file_info)
+
+	result = asyncio.run(encoder.refresh_files(AsyncMock()))
+
+	assert result == {"removed": 0, "added": 1}
+	assert filenames(encoder) == ["sub/ABC-123.mp4"]
+
+
+def test_get_output_file_mirrors_folder_structure(tmp_path: Path):
+	"""preserve_folder_structure 가 켜지면 출력 경로에 입력 하위 폴더를 붙인다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("sub/ABC-123.mp4")
+	file_info.output_filename = "ABC-123-HD.mp4"
+
+	assert encoder.get_output_file(file_info) == tmp_path / "ABC-123-HD.mp4"
+
+	encoder.preserve_folder_structure = True
+	assert encoder.get_output_file(file_info) == tmp_path / "sub" / "ABC-123-HD.mp4"
+
+
+def test_build_command_uses_mirrored_output_path(tmp_path: Path):
+	"""폴더 구조 유지가 켜지면 ffmpeg 출력 경로도 하위 폴더를 포함한다."""
+	encoder = make_encoder(tmp_path)
+	encoder.preserve_folder_structure = True
+	file_info = FileInfo("sub/ABC-123.mp4")
+	file_info.output_filename = "ABC-123-HD.mp4"
+
+	cmd = encoder.build_ffmpeg_command(file_info)
+
+	assert cmd[-1] == str(tmp_path / "sub" / "ABC-123-HD.mp4")
+
+
+def test_requeue_completed_file_resets_progress(tmp_path: Path):
+	"""완료 파일을 재인코딩 대기 상태로 되돌리고 진행 정보를 초기화한다."""
+	encoder = make_encoder(tmp_path)
+	file_info = FileInfo("ABC-123.mp4", FileStatus.COMPLETED)
+	file_info.video_info.width = 3840
+	file_info.video_info.height = 2160
+	file_info.video_info.pixel_count = 3840 * 2160
+	file_info.output_filename = "ABC-123-HD.mp4"
+	file_info.output_size = 1234
+	file_info.elapsed_seconds = 5.5
+	file_info.input_size = 9999
+	file_info.progress.frame = 100
+	encoder.files = [file_info]
+
+	assert encoder.requeue_file("ABC-123.mp4") is True
+	assert file_info.status == FileStatus.PENDING
+	assert file_info.output_size == 0
+	assert file_info.elapsed_seconds == 0.0
+	assert file_info.progress.frame == 0
+	assert file_info.input_size == 9999
+	assert file_info.output_filename == "ABC-123-HD.mp4"
+
+
+@pytest.mark.parametrize("status", [
+	FileStatus.PENDING, FileStatus.IN_PROGRESS, FileStatus.FAILED, FileStatus.STOPPED
+])
+def test_requeue_rejects_non_completed_file(tmp_path: Path, status: FileStatus):
+	"""완료 상태가 아닌 파일은 재인코딩 대기로 되돌리지 않는다."""
+	encoder = make_encoder(tmp_path)
+	encoder.files = [FileInfo("ABC-123.mp4", status)]
+
+	assert encoder.requeue_file("ABC-123.mp4") is False
+	assert encoder.files[0].status == status
+
+
+def test_requeue_rejects_unknown_file(tmp_path: Path):
+	"""목록에 없는 파일은 재인코딩 대기로 되돌리지 않는다."""
+	encoder = make_encoder(tmp_path)
+	encoder.files = []
+
+	assert encoder.requeue_file("none.mp4") is False
 
 
 def make_list_encoder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: List[str]) -> VideoEncoder:

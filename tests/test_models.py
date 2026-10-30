@@ -73,6 +73,18 @@ class TestConfigKey:
         """Templates 디렉터리 키 존재 확인."""
         assert ConfigKey.TEMPLATES_DIR == "templates_dir"
 
+    def test_x265_preset_key_exists(self):
+        """x265 preset 키 존재 확인."""
+        assert ConfigKey.X265_PRESET == "x265_preset"
+
+    def test_search_subfolders_key_exists(self):
+        """하위 폴더 검색 키 존재 확인."""
+        assert ConfigKey.SEARCH_SUBFOLDERS == "search_subfolders"
+
+    def test_preserve_folder_structure_key_exists(self):
+        """원본 폴더 구조 유지 키 존재 확인."""
+        assert ConfigKey.PRESERVE_FOLDER_STRUCTURE == "preserve_folder_structure"
+
     def test_default_key_exists(self):
         """Default 레졸루션 키 존재 확인."""
         assert ConfigKey.DEFAULT_RESOLUTION == "default_resolution"

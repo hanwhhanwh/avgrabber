@@ -133,3 +133,5 @@ conf/encode.json.*.bak
 
 # 임시 작업 폴더
 .tmp/
+# Claude Code session archive (session-md-archiver plugin)
+claude-session-log/

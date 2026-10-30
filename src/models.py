@@ -18,9 +18,12 @@ class ConfigKey:
     VIDEO_CODEC: Final[str] = "video_codec"
     SVTAV1_PRESET: Final[str] = "svtav1_preset"
     SVTAV1_BIT_DEPTH: Final[str] = "svtav1_bit_depth"
+    X265_PRESET: Final[str] = "x265_preset"
     CRF: Final[str] = "crf"
     VOLUME: Final[str] = "volume"
     AUDIO_BITRATE: Final[str] = "audio_bitrate"
+    SEARCH_SUBFOLDERS: Final[str] = "search_subfolders"
+    PRESERVE_FOLDER_STRUCTURE: Final[str] = "preserve_folder_structure"
     TEMPLATES_DIR: Final[str] = "templates_dir"
     DEFAULT_RESOLUTION: Final[str] = "default_resolution"
 
@@ -37,6 +40,14 @@ class ConfigDef:
     DEFAULT_VIDEO_CODEC: Final[str] = "libsvtav1"
     DEFAULT_SVTAV1_PRESET: Final[int] = 3
     DEFAULT_SVTAV1_BIT_DEPTH: Final[int] = 10
+    DEFAULT_X265_PRESET: Final[str] = "slow"
+    # x265 encoder preset (빠른 순서 → 느린 순서)
+    X265_PRESETS: Final[Tuple[str, ...]] = (
+        "ultrafast", "superfast", "veryfast", "faster", "fast",
+        "medium", "slow", "slower", "veryslow", "placebo"
+    )
+    DEFAULT_SEARCH_SUBFOLDERS: Final[bool] = False
+    DEFAULT_PRESERVE_FOLDER_STRUCTURE: Final[bool] = False
     DEFAULT_CRF: Final[Optional[int]] = None    # None 이면 코덱별 권장 CRF 사용
     DEFAULT_CRF_SVT_AV1: Final[int] = 30
     DEFAULT_CRF_X265: Final[int] = 27

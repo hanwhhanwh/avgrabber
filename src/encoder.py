@@ -321,6 +321,7 @@ class VideoEncoder:
 
 	async def get_video_files(self) -> List[Path]:
 		"""입력 디렉토리에서 MP4 파일 목록을 정렬하여 반환합니다.
+		search_subfolders 가 True 이면 하위 폴더까지 검색합니다.
 
 		Returns:
 			List[Path]: 정렬된 MP4 파일 경로 리스트 (디렉토리 없을 시 빈 리스트)
@@ -328,7 +329,24 @@ class VideoEncoder:
 		if (not self.input_dir.exists()):
 			return []
 
+		if (self.search_subfolders):
+			return sorted(self.input_dir.rglob("*.mp4"))
 		return sorted(self.input_dir.glob("*.mp4"))
+
+
+	def _relative_filename(self, video_file: Path) -> str:
+		"""입력 디렉토리 기준 상대 경로를 POSIX 형식 문자열로 반환합니다.
+
+		Args:
+			video_file (Path): 입력 파일 경로
+
+		Returns:
+			str: 입력 디렉토리 기준 상대 경로 (기준 밖이면 파일명)
+		"""
+		try:
+			return video_file.relative_to(self.input_dir).as_posix()
+		except ValueError:
+			return video_file.name
 
 
 	async def create_file_info(self, video_file: Path) -> FileInfo:
@@ -341,7 +359,7 @@ class VideoEncoder:
 		Returns:
 			FileInfo: 메타데이터·자막·출력 파일명이 채워진 파일 정보
 		"""
-		file_info = FileInfo(str(video_file.name))
+		file_info = FileInfo(self._relative_filename(video_file))
 		file_info.input_size = video_file.stat().st_size if (video_file.exists()) else 0
 		subtitle_file = self.find_subtitle(video_file)
 		file_info.video_info = await self.get_video_info_with_ffprobe(video_file)
@@ -432,7 +450,7 @@ class VideoEncoder:
 		self.refreshing = True
 		try:
 			video_files = await self.get_video_files()
-			video_names = {video_file.name for video_file in video_files}
+			video_names = {self._relative_filename(video_file) for video_file in video_files}
 
 			current = self._get_current_file()
 			count_before = len(self.files)
@@ -446,7 +464,7 @@ class VideoEncoder:
 
 			added = 0
 			for video_file in video_files:
-				if (any(f.filename == video_file.name for f in self.files)):
+				if (any(f.filename == self._relative_filename(video_file) for f in self.files)):
 					continue
 				self.files.append(await self.create_file_info(video_file))
 				added += 1
@@ -531,6 +549,86 @@ class VideoEncoder:
 		return False
 
 
+	def apply_settings(self, apply_resolution: bool = False) -> None:
+		"""변경된 설정을 인코더의 경로·기본 해상도에 즉시 반영합니다.
+
+		Args:
+			apply_resolution (bool): True 이면 아직 시작하지 않은 파일의 해상도와
+				출력 파일명도 새 기본 해상도로 다시 계산합니다.
+		"""
+		self.input_dir = Path(self.config.get(ConfigKey.INPUT_DIR))
+		self.output_dir = Path(self.config.get(ConfigKey.OUTPUT_DIR))
+		self.subtitle_dir = Path(self.config.get(ConfigKey.SUBTITLE_DIR))
+		self.log_dir = Path(self.config.get(ConfigKey.LOG_DIR))
+		self.resolution_mode = self.get_default_resolution()
+		self.search_subfolders = bool(self.config.get(ConfigKey.SEARCH_SUBFOLDERS, ConfigDef.DEFAULT_SEARCH_SUBFOLDERS))
+		self.preserve_folder_structure = bool(self.config.get(ConfigKey.PRESERVE_FOLDER_STRUCTURE, ConfigDef.DEFAULT_PRESERVE_FOLDER_STRUCTURE))
+		self._ensure_directories()
+
+		if (apply_resolution):
+			self.apply_default_resolution()
+
+
+	def apply_default_resolution(self) -> None:
+		"""아직 시작하지 않은 파일에 기본 해상도를 적용하고 출력 파일명을 다시 계산합니다.
+		진행 중·완료된 파일은 이미 인코딩했거나 진행 중이므로 변경하지 않습니다.
+		"""
+		for file_info in self.files:
+			if (file_info.status in (FileStatus.IN_PROGRESS, FileStatus.COMPLETED)):
+				continue
+
+			file_info.resolution_mode = self.resolution_mode
+			file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, self.resolution_mode)
+			file_info.output_filename = self.generate_output_filename(
+				self.input_dir / file_info.filename,
+				file_info.video_info,
+				file_info.subtitle_file,
+				self.resolution_mode,
+				use_uncensored=self.check_uncensored_pattern(file_info.filename)
+			)
+
+
+	def requeue_file(self, filename: str) -> bool:
+		"""완료된 파일을 다시 인코딩할 수 있도록 대기 상태로 되돌립니다.
+
+		Args:
+			filename (str): 다시 인코딩할 파일명
+
+		Returns:
+			bool: 대기 상태로 되돌렸으면 True, 완료된 파일을 찾지 못하면 False
+		"""
+		file_info = next((f for f in self.files if (f.filename == filename)), None)
+		if ((file_info is None) or (file_info.status != FileStatus.COMPLETED)):
+			return False
+
+		file_info.status = FileStatus.PENDING
+		file_info.progress = ProgressInfo()
+		file_info.output_size = 0
+		file_info.elapsed_seconds = 0.0
+		file_info.scale_filter = self.calculate_scale_filter(file_info.video_info, file_info.resolution_mode)
+		file_info.output_filename = self.generate_output_filename(
+			self.input_dir / file_info.filename,
+			file_info.video_info,
+			file_info.subtitle_file,
+			file_info.resolution_mode,
+			use_uncensored=self.check_uncensored_pattern(file_info.filename)
+		)
+		return True
+
+
+	def get_default_resolution(self) -> ResolutionMode:
+		"""설정에 저장된 기본 해상도 모드를 반환합니다.
+
+		Returns:
+			ResolutionMode: 기본 해상도 모드 (값이 잘못되어 있으면 HD)
+		"""
+		configured = self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value)
+		try:
+			return ResolutionMode(configured)
+		except ValueError:
+			return ResolutionMode.HD
+
+
 	def get_video_codec(self) -> VideoCodec:
 		"""
 		설정의 video_codec 값을 VideoCodec 으로 변환합니다.
@@ -584,7 +682,8 @@ class VideoEncoder:
 
 	def get_preset(self, video_codec: VideoCodec) -> str:
 		"""
-		코덱별 인코딩 preset 값을 반환합니다. (x265: slow 고정, SVT-AV1: 설정 값)
+		코덱별 인코딩 preset 값을 반환합니다.
+		(x265: x265_preset 설정, SVT-AV1: svtav1_preset 설정)
 
 		Args:
 			video_codec (VideoCodec): 인코딩에 사용할 영상 코덱
@@ -593,22 +692,45 @@ class VideoEncoder:
 			str: preset 값
 		"""
 		if (video_codec == VideoCodec.X265):
-			return "slow"
+			preset = str(self.config.get(ConfigKey.X265_PRESET, ConfigDef.DEFAULT_X265_PRESET)).lower()
+			if (preset not in ConfigDef.X265_PRESETS):
+				print(f"지원하지 않는 x265_preset '{preset}', 기본값 {ConfigDef.DEFAULT_X265_PRESET} 사용")
+				return ConfigDef.DEFAULT_X265_PRESET
+			return preset
 		return str(self.config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET))
+
+
+	def get_output_file(self, file_info: FileInfo) -> Path:
+		"""파일 정보에 해당하는 출력 파일 경로를 반환합니다.
+		preserve_folder_structure 가 True 이면 입력 파일의 하위 폴더 구조를 출력에도 유지합니다.
+
+		Args:
+			file_info (FileInfo): 출력 경로를 계산할 파일 정보
+
+		Returns:
+			Path: 출력 파일 경로
+		"""
+		output_dir = self.output_dir
+		if (self.preserve_folder_structure):
+			relative_parent = Path(file_info.filename).parent
+			if (str(relative_parent) not in ("", ".")):
+				output_dir = output_dir / relative_parent
+		return output_dir / file_info.output_filename
 
 
 	def get_encode_settings(self) -> Dict[str, Any]:
 		"""
-		웹 UI 표시용 인코딩 설정(코덱, preset, CRF)을 반환합니다.
+		웹 UI 표시용 인코딩 설정(코덱, preset, CRF, 기본 해상도)을 반환합니다.
 
 		Returns:
-			Dict[str, Any]: {"codec": 코덱명, "preset": preset, "crf": CRF} 딕셔너리
+			Dict[str, Any]: 코덱명, preset, CRF, 기본 해상도를 담은 딕셔너리
 		"""
 		video_codec = self.get_video_codec()
 		return {
 			"codec": video_codec.value,
 			"preset": self.get_preset(video_codec),
-			"crf": self.get_crf(video_codec)
+			"crf": self.get_crf(video_codec),
+			"default_resolution": self.get_default_resolution().value
 		}
 
 
@@ -622,7 +744,7 @@ class VideoEncoder:
 			List[str]: FFmpeg 실행 인자 리스트
 		"""
 		input_file = self.input_dir / file_info.filename
-		output_file = self.output_dir / file_info.output_filename
+		output_file = self.get_output_file(file_info)
 
 		subtitle_file = self.find_subtitle(input_file)
 
@@ -646,7 +768,12 @@ class VideoEncoder:
 
 		# 코덱별 전용 옵션 (libsvtav1 은 -tune 옵션이 없어 svtav1-params 로 전달)
 		if (video_codec == VideoCodec.X265):
-			cmd.extend(["-preset:v", self.get_preset(video_codec), "-tune:v", "ssim"])
+			# x265 는 항상 10 bit 로 인코딩한다.
+			cmd.extend([
+				"-preset:v", self.get_preset(video_codec),
+				"-tune:v", "ssim",
+				"-pix_fmt", "yuv420p10le"
+			])
 		else:
 			cmd.extend([
 				"-preset:v", self.get_preset(video_codec),
@@ -755,7 +882,8 @@ class VideoEncoder:
 			return
 
 		subtitle_source = Path(file_info.subtitle_file)
-		output_subtitle = self.output_dir / f"{Path(file_info.output_filename).stem}{subtitle_source.suffix.lower()}"
+		output_subtitle = self.get_output_file(file_info).parent / f"{Path(file_info.output_filename).stem}{subtitle_source.suffix.lower()}"
+		output_subtitle.parent.mkdir(parents=True, exist_ok=True)
 		copy2(str(subtitle_source), str(output_subtitle))
 
 
@@ -774,7 +902,7 @@ class VideoEncoder:
 		if ((file_info.input_size <= 0) and (input_file.exists())):
 			file_info.input_size = input_file.stat().st_size
 
-		output_file = self.output_dir / file_info.output_filename
+		output_file = self.get_output_file(file_info)
 		file_info.output_size = output_file.stat().st_size if (output_file.exists()) else 0
 		self._copy_subtitle(file_info)
 
@@ -799,6 +927,7 @@ class VideoEncoder:
 		await websocket_manager.broadcast_current_status(self.get_current_status())
 
 		cmd = self.build_ffmpeg_command(file_info)
+		self.get_output_file(file_info).parent.mkdir(parents=True, exist_ok=True)
 
 		input_file = self.input_dir / file_info.filename
 		log_file = self.log_dir / f"{input_file.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -1003,6 +1132,8 @@ class VideoEncoder:
 		self.subtitle_dir = Path(self.config.get(ConfigKey.SUBTITLE_DIR))
 		self.log_dir = Path(self.config.get(ConfigKey.LOG_DIR))
 		self.resolution_mode = ResolutionMode(self.config.get(ConfigKey.DEFAULT_RESOLUTION, ResolutionMode.HD.value))
+		self.search_subfolders = bool(self.config.get(ConfigKey.SEARCH_SUBFOLDERS, ConfigDef.DEFAULT_SEARCH_SUBFOLDERS))
+		self.preserve_folder_structure = bool(self.config.get(ConfigKey.PRESERVE_FOLDER_STRUCTURE, ConfigDef.DEFAULT_PRESERVE_FOLDER_STRUCTURE))
 
 		return args
 
@@ -1017,11 +1148,15 @@ class VideoEncoder:
 		print(f"자막 디렉토리: {config.get(ConfigKey.SUBTITLE_DIR)}")
 		print(f"로그 디렉토리: {config.get(ConfigKey.LOG_DIR)}")
 		print(f"기본 해상도: {config.get(ConfigKey.DEFAULT_RESOLUTION)}")
+		print(f"하위 폴더 검색: {self.search_subfolders}")
+		print(f"원본 폴더 구조 유지: {self.preserve_folder_structure}")
 		video_codec = self.get_video_codec()
 		print(f"영상 코덱: {video_codec.value}")
 		if (video_codec == VideoCodec.SVT_AV1):
 			print(f"SVT-AV1 preset: {config.get(ConfigKey.SVTAV1_PRESET, ConfigDef.DEFAULT_SVTAV1_PRESET)}")
 			print(f"SVT-AV1 픽셀 포맷: {self.get_svtav1_pix_fmt()}")
+		else:
+			print(f"x265 preset: {self.get_preset(video_codec)}")
 		print(f"CRF: {self.get_crf(video_codec)}")
 		print(f"볼륨: {config.get(ConfigKey.VOLUME)}")
 		print(f"오디오 비트레이트: {config.get(ConfigKey.AUDIO_BITRATE)}")
